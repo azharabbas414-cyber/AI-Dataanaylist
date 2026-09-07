@@ -1,8 +1,8 @@
+
 import streamlit as st
 import pandas as pd
-import io
 import os
-from openai import OpenAI
+from google import genai
 
 # ---------------------------------------------------------
 # PAGE CONFIGURATION
@@ -43,20 +43,20 @@ with st.sidebar:
     st.write("• XLS")
 
 # ---------------------------------------------------------
-# OPENAI CLIENT
+# GEMINI CLIENT
 # ---------------------------------------------------------
 
 api_key = None
 
 try:
-    api_key = st.secrets["OPENAI_API_KEY"]
+    api_key = st.secrets["GEMINI_API_KEY"]
 except Exception:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
 
 client = None
 
 if api_key:
-    client = OpenAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
 # ---------------------------------------------------------
 # FILE UPLOAD
@@ -270,11 +270,11 @@ if uploaded_file is not None:
             elif client is None:
 
                 st.error(
-                    "OpenAI API key is not configured."
+                    "Gemini API key is not configured."
                 )
 
                 st.info(
-                    "Add OPENAI_API_KEY to Streamlit Secrets."
+                    "Add GEMINI_API_KEY to Streamlit Secrets."
                 )
 
             else:
@@ -321,9 +321,9 @@ Do not invent values that are not present in the supplied dataset information.
 
                     try:
 
-                        response = client.responses.create(
-                            model="gpt-5.6",
-                            input=prompt
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=prompt
                         )
 
                         st.subheader(
@@ -331,7 +331,7 @@ Do not invent values that are not present in the supplied dataset information.
                         )
 
                         st.write(
-                            response.output_text
+                            response.text
                         )
 
                     except Exception as e:
@@ -359,6 +359,5 @@ else:
 st.markdown("---")
 
 st.caption(
-    "AI Data Analyst Assistant • Built with Python + Streamlit"
+    "AI Data Analyst Assistant • Built with Python + Streamlit + Gemini"
 )
-
