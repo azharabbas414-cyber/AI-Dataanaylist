@@ -1,0 +1,8 @@
+```
+text
+streamlit
+pandas
+openpyxl
+xlrd
+openai
+```
