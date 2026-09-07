@@ -1,50 +1,37 @@
-
 import streamlit as st
 import pandas as pd
 import os
+import time
+import random
 from google import genai
 
-# ---------------------------------------------------------
-# PAGE CONFIGURATION
-# ---------------------------------------------------------
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 
 st.set_page_config(
-    page_title="AI Data Analyst",
+    page_title="AI Data Analyst Assistant",
     page_icon="📊",
     layout="wide"
 )
 
-# ---------------------------------------------------------
+
+# ============================================================
 # TITLE
-# ---------------------------------------------------------
+# ============================================================
 
 st.title("📊 AI Data Analyst Assistant")
+
 st.write(
-    "Upload a CSV or Excel file and use AI to explore, "
-    "analyze and visualize your data."
+    "Upload your CSV or Excel dataset and analyze it using "
+    "Pandas and Gemini AI."
 )
 
-# ---------------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------------
 
-with st.sidebar:
-    st.header("⚙️ Settings")
-
-    st.info(
-        "Upload a dataset and then ask questions about "
-        "your data using the AI assistant."
-    )
-
-    st.markdown("---")
-    st.write("Supported files:")
-    st.write("• CSV")
-    st.write("• XLSX")
-    st.write("• XLS")
-
-# ---------------------------------------------------------
-# GEMINI CLIENT
-# ---------------------------------------------------------
+# ============================================================
+# GEMINI API CONFIGURATION
+# ============================================================
 
 api_key = None
 
@@ -53,134 +40,380 @@ try:
 except Exception:
     api_key = os.getenv("GEMINI_API_KEY")
 
+
 client = None
 
 if api_key:
     client = genai.Client(api_key=api_key)
 
-# ---------------------------------------------------------
+
+# ============================================================
 # FILE UPLOAD
-# ---------------------------------------------------------
+# ============================================================
 
 uploaded_file = st.file_uploader(
-    "📁 Upload your dataset",
+    "Upload your dataset",
     type=["csv", "xlsx", "xls"]
 )
 
-# ---------------------------------------------------------
-# LOAD DATA
-# ---------------------------------------------------------
 
-if uploaded_file is not None:
+# ============================================================
+# FUNCTION: LOAD DATASET
+# ============================================================
+
+def load_data(file):
 
     try:
 
-        if uploaded_file.name.lower().endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
+        if file.name.lower().endswith(".csv"):
+
+            df = pd.read_csv(file)
+
+        elif file.name.lower().endswith(".xlsx"):
+
+            df = pd.read_excel(file, engine="openpyxl")
+
+        elif file.name.lower().endswith(".xls"):
+
+            df = pd.read_excel(file, engine="xlrd")
 
         else:
-            df = pd.read_excel(uploaded_file)
 
-        st.success(
-            f"Successfully loaded: {uploaded_file.name}"
+            st.error("Unsupported file format.")
+            return None
+
+        return df
+
+    except Exception as e:
+
+        st.error(f"Error loading file: {e}")
+
+        return None
+
+
+# ============================================================
+# FUNCTION: GEMINI REQUEST WITH RETRY + FALLBACK
+# ============================================================
+
+def ask_gemini(prompt):
+
+    if client is None:
+
+        st.error("Gemini API key is not configured.")
+
+        st.info(
+            "Add GEMINI_API_KEY to Streamlit Secrets."
         )
 
-        # -------------------------------------------------
+        return None
+
+
+    # Primary and fallback models
+    models = [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash"
+    ]
+
+
+    # Number of retries for each model
+    max_retries = 3
+
+
+    last_error = None
+
+
+    # --------------------------------------------------------
+    # Try each model
+    # --------------------------------------------------------
+
+    for model in models:
+
+        for attempt in range(max_retries):
+
+            try:
+
+                # Show retry information only when needed
+                if attempt > 0:
+
+                    st.info(
+                        f"Retrying {model} "
+                        f"(attempt {attempt + 1}/{max_retries})..."
+                    )
+
+
+                response = client.models.generate_content(
+
+                    model=model,
+
+                    contents=prompt
+                )
+
+
+                # Successful response
+                if response and response.text:
+
+                    return response.text
+
+
+            except Exception as e:
+
+                last_error = e
+
+                error_text = str(e)
+
+
+                # ------------------------------------------------
+                # 503 - MODEL TEMPORARILY UNAVAILABLE
+                # ------------------------------------------------
+
+                if "503" in error_text or "UNAVAILABLE" in error_text:
+
+                    if attempt < max_retries - 1:
+
+                        # Exponential backoff:
+                        # 2s, 4s, 8s
+                        wait_time = (2 ** attempt) + random.uniform(
+                            0.5,
+                            1.5
+                        )
+
+                        st.warning(
+                            f"{model} is temporarily busy. "
+                            f"Retrying in {wait_time:.1f} seconds..."
+                        )
+
+                        time.sleep(wait_time)
+
+                        continue
+
+                    else:
+
+                        st.warning(
+                            f"{model} is still unavailable. "
+                            f"Trying the fallback model..."
+                        )
+
+                        break
+
+
+                # ------------------------------------------------
+                # 429 - RATE LIMIT / QUOTA
+                # ------------------------------------------------
+
+                elif "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+
+                    if attempt < max_retries - 1:
+
+                        wait_time = (2 ** attempt) + random.uniform(
+                            0.5,
+                            1.5
+                        )
+
+                        st.warning(
+                            f"Gemini rate limit reached. "
+                            f"Retrying in {wait_time:.1f} seconds..."
+                        )
+
+                        time.sleep(wait_time)
+
+                        continue
+
+                    else:
+
+                        st.warning(
+                            f"{model} rate limit reached. "
+                            f"Trying the fallback model..."
+                        )
+
+                        break
+
+
+                # ------------------------------------------------
+                # OTHER ERRORS
+                # ------------------------------------------------
+
+                else:
+
+                    st.error(
+                        f"Gemini request failed:\n\n{error_text}"
+                    )
+
+                    return None
+
+
+    # ========================================================
+    # ALL MODELS FAILED
+    # ========================================================
+
+    st.error(
+        "Gemini is currently unavailable.\n\n"
+        "Both Gemini models were tried with automatic retries."
+    )
+
+    if last_error:
+
+        st.info(
+            "Please wait a little and try the question again."
+        )
+
+    return None
+
+
+# ============================================================
+# PROCESS DATASET
+# ============================================================
+
+if uploaded_file is not None:
+
+    df = load_data(uploaded_file)
+
+
+    if df is not None:
+
+        st.success(
+            f"Dataset loaded successfully: {uploaded_file.name}"
+        )
+
+
+        # ====================================================
         # DATASET OVERVIEW
-        # -------------------------------------------------
+        # ====================================================
 
         st.header("📋 Dataset Overview")
 
+
         col1, col2, col3, col4 = st.columns(4)
 
+
         with col1:
-            st.metric("Rows", df.shape[0])
+
+            st.metric(
+                "Rows",
+                df.shape[0]
+            )
+
 
         with col2:
-            st.metric("Columns", df.shape[1])
+
+            st.metric(
+                "Columns",
+                df.shape[1]
+            )
+
 
         with col3:
+
             st.metric(
                 "Missing Values",
                 int(df.isna().sum().sum())
             )
 
+
         with col4:
+
             st.metric(
                 "Duplicate Rows",
                 int(df.duplicated().sum())
             )
 
-        # -------------------------------------------------
+
+        # ====================================================
         # DATA PREVIEW
-        # -------------------------------------------------
+        # ====================================================
 
         st.header("👀 Data Preview")
 
         st.dataframe(
-            df.head(100),
+            df.head(20),
             use_container_width=True
         )
 
-        # -------------------------------------------------
-        # COLUMN INFORMATION
-        # -------------------------------------------------
 
-        st.header("🔍 Column Information")
+        # ====================================================
+        # COLUMN INFORMATION
+        # ====================================================
+
+        st.header("📌 Column Information")
+
 
         column_info = pd.DataFrame({
+
             "Column": df.columns,
-            "Data Type": df.dtypes.astype(str).values,
-            "Missing Values": df.isna().sum().values,
+
+            "Data Type": [
+                str(dtype)
+                for dtype in df.dtypes
+            ],
+
+            "Missing Values": [
+                int(df[col].isna().sum())
+                for col in df.columns
+            ],
+
             "Unique Values": [
-                df[column].nunique()
-                for column in df.columns
+                int(df[col].nunique())
+                for col in df.columns
             ]
+
         })
+
 
         st.dataframe(
             column_info,
             use_container_width=True
         )
 
-        # -------------------------------------------------
-        # STATISTICS
-        # -------------------------------------------------
 
-        st.header("📈 Statistical Summary")
+        # ====================================================
+        # STATISTICAL SUMMARY
+        # ====================================================
+
+        st.header("📊 Statistical Summary")
+
 
         numeric_columns = df.select_dtypes(
             include="number"
-        ).columns.tolist()
+        ).columns
 
-        if numeric_columns:
+
+        if len(numeric_columns) > 0:
 
             st.dataframe(
-                df[numeric_columns].describe().T,
+                df[numeric_columns].describe(),
                 use_container_width=True
             )
 
         else:
 
             st.info(
-                "No numeric columns were found."
+                "No numeric columns found."
             )
 
-        # -------------------------------------------------
-        # MISSING VALUES
-        # -------------------------------------------------
 
-        st.header("⚠️ Missing Values")
+        # ====================================================
+        # MISSING VALUES
+        # ====================================================
+
+        st.header("🔍 Missing Values")
+
 
         missing = df.isna().sum()
-        missing = missing[missing > 0]
+
+        missing = missing[
+            missing > 0
+        ]
+
 
         if len(missing) > 0:
 
             missing_df = pd.DataFrame({
+
                 "Column": missing.index,
+
                 "Missing Values": missing.values
+
             })
+
 
             st.dataframe(
                 missing_df,
@@ -193,27 +426,38 @@ if uploaded_file is not None:
                 "No missing values found."
             )
 
-        # -------------------------------------------------
-        # VISUALIZATION
-        # -------------------------------------------------
 
-        st.header("📊 Visualization")
+        # ====================================================
+        # BASIC VISUALIZATION
+        # ====================================================
 
-        chart_type = st.selectbox(
-            "Choose chart type",
-            [
-                "Bar Chart",
-                "Line Chart",
-                "Histogram"
-            ]
+        st.header("📈 Basic Visualization")
+
+
+        numeric_cols = list(
+            df.select_dtypes(
+                include="number"
+            ).columns
         )
 
-        if numeric_columns:
+
+        if numeric_cols:
 
             selected_column = st.selectbox(
                 "Select numeric column",
-                numeric_columns
+                numeric_cols
             )
+
+
+            chart_type = st.selectbox(
+                "Select chart type",
+                [
+                    "Bar Chart",
+                    "Line Chart",
+                    "Histogram"
+                ]
+            )
+
 
             if chart_type == "Bar Chart":
 
@@ -221,45 +465,55 @@ if uploaded_file is not None:
                     df[selected_column]
                 )
 
+
             elif chart_type == "Line Chart":
 
                 st.line_chart(
                     df[selected_column]
                 )
 
+
             elif chart_type == "Histogram":
 
-                histogram_data = (
+                st.bar_chart(
                     df[selected_column]
-                    .dropna()
                     .value_counts()
                     .sort_index()
                 )
 
-                st.bar_chart(
-                    histogram_data
-                )
 
         else:
 
-            st.warning(
-                "Charts require numeric data."
+            st.info(
+                "No numeric columns available for visualization."
             )
 
-        # -------------------------------------------------
-        # AI DATA ANALYST
-        # -------------------------------------------------
 
-        st.header("🤖 Ask the AI Data Analyst")
+        # ====================================================
+        # AI DATA ANALYST
+        # ====================================================
+
+        st.header("🤖 Ask AI About Your Data")
+
 
         question = st.text_area(
-            "Ask a question about your dataset",
+            "Ask a question about the uploaded dataset",
             placeholder=(
-                "Example: Which column has the highest average value?"
+                "Example: Which customer has the highest sales?"
             )
         )
 
-        if st.button("🔎 Analyze Data"):
+
+        analyze_button = st.button(
+            "🔎 Analyze with Gemini"
+        )
+
+
+        # ====================================================
+        # AI ANALYSIS
+        # ====================================================
+
+        if analyze_button:
 
             if not question.strip():
 
@@ -267,97 +521,126 @@ if uploaded_file is not None:
                     "Please enter a question."
                 )
 
-            elif client is None:
-
-                st.error(
-                    "Gemini API key is not configured."
-                )
-
-                st.info(
-                    "Add GEMINI_API_KEY to Streamlit Secrets."
-                )
-
             else:
 
-                # Create a compact dataset description
-                dataset_info = f"""
-Dataset name: {uploaded_file.name}
+                # --------------------------------------------
+                # Prepare dataset information
+                # --------------------------------------------
 
-Rows: {df.shape[0]}
-Columns: {df.shape[1]}
+                dataset_info = {
 
-Columns and data types:
-{df.dtypes.to_string()}
+                    "rows": df.shape[0],
 
-Statistical summary:
-{df.describe(include="all").to_string()}
+                    "columns": list(df.columns),
 
-First 20 rows:
-{df.head(20).to_string()}
-"""
+                    "data_types":
+                        df.dtypes.astype(str).to_dict(),
+
+                    "missing_values":
+                        df.isna().sum().to_dict(),
+
+                    "numeric_summary":
+                        df.describe(
+                            include="number"
+                        ).to_dict()
+
+                }
+
+
+                # --------------------------------------------
+                # Sample data
+                # --------------------------------------------
+
+                sample_data = df.head(20).to_string(
+                    index=False
+                )
+
+
+                # --------------------------------------------
+                # AI PROMPT
+                # --------------------------------------------
 
                 prompt = f"""
-You are an expert data analyst.
+You are an expert Data Analyst.
 
-Analyze the following dataset information.
+The user uploaded a dataset to a Streamlit application.
 
-{dataset_info}
+Answer the user's question using the dataset information
+provided below.
 
-User question:
+Be accurate and concise.
+
+If the requested calculation cannot be reliably determined
+from the supplied information, clearly say so.
+
+Do not invent data.
+
+DATASET INFORMATION:
+
+Rows:
+{dataset_info["rows"]}
+
+Columns:
+{dataset_info["columns"]}
+
+Data Types:
+{dataset_info["data_types"]}
+
+Missing Values:
+{dataset_info["missing_values"]}
+
+Numeric Summary:
+{dataset_info["numeric_summary"]}
+
+SAMPLE DATA:
+
+{sample_data}
+
+USER QUESTION:
+
 {question}
 
-Provide:
-1. A clear answer.
-2. Important observations.
-3. Any assumptions or limitations.
-4. If useful, provide Python/Pandas code.
-
-Do not invent values that are not present in the supplied dataset information.
+Provide a clear answer and explain the calculation or reasoning
+when appropriate.
 """
 
+
+                # --------------------------------------------
+                # Call Gemini
+                # --------------------------------------------
+
                 with st.spinner(
-                    "🤖 AI is analyzing your data..."
+                    "Gemini is analyzing your data..."
                 ):
 
-                    try:
+                    answer = ask_gemini(
+                        prompt
+                    )
 
-                        response = client.models.generate_content(
-                            model="gemini-3.6-flash",
-                            contents=prompt
-                        )
 
-                        st.subheader(
-                            "🤖 AI Analysis"
-                        )
+                # --------------------------------------------
+                # Display result
+                # --------------------------------------------
 
-                        st.write(
-                            response.text
-                        )
+                if answer:
 
-                    except Exception as e:
+                    st.subheader(
+                        "🤖 AI Analysis"
+                    )
 
-                        st.error(
-                            f"AI request failed: {e}"
-                        )
+                    st.write(
+                        answer
+                    )
 
-    except Exception as e:
 
-        st.error(
-            f"Could not read the file: {e}"
-        )
-
-else:
-
-    st.info(
-        "👆 Upload a CSV or Excel file to get started."
-    )
-
-# ---------------------------------------------------------
+# ============================================================
 # FOOTER
-# ---------------------------------------------------------
+# ============================================================
 
-st.markdown("---")
+st.divider()
 
 st.caption(
-    "AI Data Analyst Assistant • Built with Python + Streamlit + Gemini"
+    "AI Data Analyst Assistant • "
+    "Built with Streamlit + Pandas + Gemini"
 )
+
