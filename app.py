@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import io
@@ -362,4 +361,4 @@ st.markdown("---")
 st.caption(
     "AI Data Analyst Assistant • Built with Python + Streamlit"
 )
-```
+
