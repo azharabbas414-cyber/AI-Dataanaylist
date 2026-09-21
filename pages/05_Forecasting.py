@@ -23,7 +23,7 @@ st.set_page_config(
 
 
 # ============================================================
-# CSS
+# CUSTOM CSS
 # ============================================================
 
 st.markdown(
@@ -77,14 +77,6 @@ st.markdown(
         font-size: 27px;
         font-weight: 700;
         margin-top: 6px;
-    }
-
-    .info-card {
-        padding: 16px;
-        border-radius: 12px;
-        border: 1px solid rgba(100, 116, 139, 0.18);
-        margin-top: 10px;
-        margin-bottom: 10px;
     }
 
     </style>
@@ -147,16 +139,20 @@ st.markdown(
 
 
 # ============================================================
-# DETECT DATE COLUMNS
+# DATE DETECTION
 # ============================================================
 
 try:
 
     date_columns = detect_datetime_columns(df)
 
-except Exception:
+except Exception as exc:
 
-    date_columns = []
+    st.error(
+        f"Date detection failed: {exc}"
+    )
+
+    st.stop()
 
 
 if not date_columns:
@@ -189,7 +185,7 @@ if not date_columns:
 
 
 # ============================================================
-# DETECT NUMERIC COLUMNS
+# NUMERIC COLUMN DETECTION
 # ============================================================
 
 numeric_columns = []
@@ -216,7 +212,7 @@ if not numeric_columns:
 
 
 # ============================================================
-# FORECAST CONTROLS
+# FORECAST CONFIGURATION
 # ============================================================
 
 st.markdown(
@@ -225,7 +221,9 @@ st.markdown(
 )
 
 
-control1, control2, control3 = st.columns([1.5, 1.5, 1])
+control1, control2, control3 = st.columns(
+    [1.5, 1.5, 1]
+)
 
 
 with control1:
@@ -299,7 +297,7 @@ if ts_df is None or len(ts_df) < 5:
 
     st.warning(
         "There are not enough valid historical observations "
-        "to generate a reliable forecast."
+        "to generate a forecast."
     )
 
     st.stop()
@@ -312,7 +310,9 @@ if ts_df is None or len(ts_df) < 5:
 prepared = ts_df.copy()
 
 
-# Detect date column in returned dataframe
+# ------------------------------------------------------------
+# Find date column
+# ------------------------------------------------------------
 
 possible_date_cols = [
     col
@@ -334,7 +334,9 @@ else:
     prepared_date_column = prepared.columns[0]
 
 
-# Detect value column
+# ------------------------------------------------------------
+# Find value column
+# ------------------------------------------------------------
 
 if metric_column in prepared.columns:
 
@@ -345,7 +347,9 @@ else:
     possible_value_columns = [
         col
         for col in prepared.columns
-        if pd.api.types.is_numeric_dtype(prepared[col])
+        if pd.api.types.is_numeric_dtype(
+            prepared[col]
+        )
     ]
 
     if possible_value_columns:
@@ -355,11 +359,16 @@ else:
     else:
 
         st.error(
-            "Could not identify the numeric value column in the prepared time series."
+            "Could not identify the numeric value column "
+            "in the prepared time series."
         )
 
         st.stop()
 
+
+# ------------------------------------------------------------
+# Convert types
+# ------------------------------------------------------------
 
 prepared[prepared_date_column] = pd.to_datetime(
     prepared[prepared_date_column],
@@ -371,12 +380,14 @@ prepared[prepared_value_column] = pd.to_numeric(
     errors="coerce",
 )
 
+
 prepared = prepared.dropna(
     subset=[
         prepared_date_column,
         prepared_value_column,
     ]
 )
+
 
 prepared = prepared.sort_values(
     prepared_date_column
@@ -386,7 +397,8 @@ prepared = prepared.sort_values(
 if len(prepared) < 5:
 
     st.warning(
-        "Not enough valid observations remain after date/value processing."
+        "Not enough valid observations remain after "
+        "date/value processing."
     )
 
     st.stop()
@@ -396,13 +408,24 @@ if len(prepared) < 5:
 # HISTORICAL SUMMARY
 # ============================================================
 
-latest_value = prepared[prepared_value_column].iloc[-1]
+latest_value = prepared[
+    prepared_value_column
+].iloc[-1]
 
-average_value = prepared[prepared_value_column].mean()
 
-minimum_value = prepared[prepared_value_column].min()
+average_value = prepared[
+    prepared_value_column
+].mean()
 
-maximum_value = prepared[prepared_value_column].max()
+
+minimum_value = prepared[
+    prepared_value_column
+].min()
+
+
+maximum_value = prepared[
+    prepared_value_column
+].max()
 
 
 # ============================================================
@@ -424,7 +447,9 @@ with k1:
         f"""
         <div class="metric-card">
             <div class="metric-label">Observations</div>
-            <div class="metric-value">{len(prepared):,}</div>
+            <div class="metric-value">
+                {len(prepared):,}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -437,7 +462,9 @@ with k2:
         f"""
         <div class="metric-card">
             <div class="metric-label">Latest Value</div>
-            <div class="metric-value">{latest_value:,.2f}</div>
+            <div class="metric-value">
+                {latest_value:,.2f}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -450,7 +477,9 @@ with k3:
         f"""
         <div class="metric-card">
             <div class="metric-label">Average</div>
-            <div class="metric-value">{average_value:,.2f}</div>
+            <div class="metric-value">
+                {average_value:,.2f}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -498,7 +527,12 @@ historical_fig.add_trace(
 historical_fig.update_layout(
     title=f"Historical {metric_column}",
     height=450,
-    margin=dict(l=20, r=20, t=60, b=20),
+    margin=dict(
+        l=20,
+        r=20,
+        t=60,
+        b=20,
+    ),
     xaxis_title="Date",
     yaxis_title=metric_column,
     hovermode="x unified",
@@ -521,31 +555,19 @@ st.markdown(
 )
 
 
-with st.spinner("Building forecasting model..."):
+with st.spinner(
+    "Building forecasting model..."
+):
 
     try:
 
+        # IMPORTANT:
+        # build_forecast() expects forecast_periods
+
         forecast_result = build_forecast(
             prepared,
-            horizon=horizon,
+            forecast_periods=horizon,
         )
-
-    except TypeError:
-
-        try:
-
-            forecast_result = build_forecast(
-                prepared,
-                forecast_horizon=horizon,
-            )
-
-        except Exception as exc:
-
-            st.error(
-                f"Forecast model could not be built: {exc}"
-            )
-
-            st.stop()
 
     except Exception as exc:
 
@@ -564,15 +586,25 @@ forecast_df = None
 model = None
 
 
-if isinstance(forecast_result, pd.DataFrame):
+if isinstance(
+    forecast_result,
+    pd.DataFrame,
+):
 
     forecast_df = forecast_result
 
-elif isinstance(forecast_result, tuple):
+
+elif isinstance(
+    forecast_result,
+    tuple,
+):
 
     for item in forecast_result:
 
-        if isinstance(item, pd.DataFrame):
+        if isinstance(
+            item,
+            pd.DataFrame,
+        ):
 
             forecast_df = item
 
@@ -580,7 +612,11 @@ elif isinstance(forecast_result, tuple):
 
             model = item
 
-elif isinstance(forecast_result, dict):
+
+elif isinstance(
+    forecast_result,
+    dict,
+):
 
     for key in [
         "forecast",
@@ -598,13 +634,16 @@ elif isinstance(forecast_result, dict):
 
             break
 
-    model = forecast_result.get("model")
+    model = forecast_result.get(
+        "model"
+    )
 
 
 if forecast_df is None:
 
     st.error(
-        "The forecasting engine returned an unsupported result format."
+        "The forecasting engine returned an "
+        "unsupported result format."
     )
 
     st.stop()
@@ -614,7 +653,7 @@ forecast_df = forecast_df.copy()
 
 
 # ============================================================
-# IDENTIFY FORECAST COLUMNS
+# IDENTIFY FORECAST DATE COLUMN
 # ============================================================
 
 forecast_date_candidates = [
@@ -630,12 +669,20 @@ forecast_date_candidates = [
 
 if forecast_date_candidates:
 
-    forecast_date_column = forecast_date_candidates[0]
+    forecast_date_column = (
+        forecast_date_candidates[0]
+    )
 
 else:
 
-    forecast_date_column = forecast_df.columns[0]
+    forecast_date_column = (
+        forecast_df.columns[0]
+    )
 
+
+# ============================================================
+# IDENTIFY FORECAST VALUE COLUMN
+# ============================================================
 
 forecast_numeric_candidates = [
     col
@@ -649,13 +696,12 @@ forecast_numeric_candidates = [
 if not forecast_numeric_candidates:
 
     st.error(
-        "No numeric forecast values were returned by the model."
+        "No numeric forecast values were returned "
+        "by the model."
     )
 
     st.stop()
 
-
-# Prefer a prediction-like column
 
 prediction_candidates = [
     col
@@ -674,22 +720,36 @@ prediction_candidates = [
 
 if prediction_candidates:
 
-    forecast_value_column = prediction_candidates[0]
+    forecast_value_column = (
+        prediction_candidates[0]
+    )
 
 else:
 
-    forecast_value_column = forecast_numeric_candidates[-1]
+    forecast_value_column = (
+        forecast_numeric_candidates[-1]
+    )
 
 
-forecast_df[forecast_date_column] = pd.to_datetime(
+# ============================================================
+# CLEAN FORECAST DATA
+# ============================================================
+
+forecast_df[
+    forecast_date_column
+] = pd.to_datetime(
     forecast_df[forecast_date_column],
     errors="coerce",
 )
 
-forecast_df[forecast_value_column] = pd.to_numeric(
+
+forecast_df[
+    forecast_value_column
+] = pd.to_numeric(
     forecast_df[forecast_value_column],
     errors="coerce",
 )
+
 
 forecast_df = forecast_df.dropna(
     subset=[
@@ -702,7 +762,8 @@ forecast_df = forecast_df.dropna(
 if forecast_df.empty:
 
     st.error(
-        "The forecast result contains no valid prediction values."
+        "The forecast result contains no valid "
+        "prediction values."
     )
 
     st.stop()
@@ -737,15 +798,25 @@ forecast_fig.add_trace(
         y=forecast_df[forecast_value_column],
         mode="lines+markers",
         name="Forecast",
-        line=dict(dash="dash"),
+        line=dict(
+            dash="dash"
+        ),
     )
 )
 
 
 forecast_fig.update_layout(
-    title=f"{metric_column} — Historical vs Forecast",
+    title=(
+        f"{metric_column} — "
+        "Historical vs Forecast"
+    ),
     height=500,
-    margin=dict(l=20, r=20, t=60, b=20),
+    margin=dict(
+        l=20,
+        r=20,
+        t=60,
+        b=20,
+    ),
     xaxis_title="Date",
     yaxis_title=metric_column,
     hovermode="x unified",
@@ -769,19 +840,32 @@ forecast_values = forecast_df[
 
 if not forecast_values.empty:
 
-    first_forecast = forecast_values.iloc[0]
-
-    last_forecast = forecast_values.iloc[-1]
-
-    forecast_average = forecast_values.mean()
-
-    forecast_change = (
-        (last_forecast - latest_value)
-        / abs(latest_value)
-        * 100
-        if latest_value != 0
-        else np.nan
+    first_forecast = (
+        forecast_values.iloc[0]
     )
+
+    last_forecast = (
+        forecast_values.iloc[-1]
+    )
+
+    forecast_average = (
+        forecast_values.mean()
+    )
+
+    if latest_value != 0:
+
+        forecast_change = (
+            (
+                last_forecast
+                - latest_value
+            )
+            / abs(latest_value)
+            * 100
+        )
+
+    else:
+
+        forecast_change = np.nan
 
 
     st.markdown(
@@ -819,7 +903,9 @@ if not forecast_values.empty:
 
     with f4:
 
-        if np.isfinite(forecast_change):
+        if np.isfinite(
+            forecast_change
+        ):
 
             st.metric(
                 "Change vs Latest",
@@ -859,43 +945,76 @@ except Exception:
     accuracy = None
 
 
-if isinstance(accuracy, dict):
+if isinstance(
+    accuracy,
+    dict,
+):
 
-    accuracy_cols = st.columns(
-        len(accuracy)
+    accuracy_items = list(
+        accuracy.items()
     )
 
-    for index, (key, value) in enumerate(
-        accuracy.items()
+    accuracy_cols = st.columns(
+        max(1, len(accuracy_items))
+    )
+
+    for index, (
+        key,
+        value,
+    ) in enumerate(
+        accuracy_items
     ):
 
         with accuracy_cols[index]:
 
-            if isinstance(value, (int, float, np.number)):
+            label = (
+                str(key)
+                .replace("_", " ")
+                .title()
+            )
+
+            if isinstance(
+                value,
+                (
+                    int,
+                    float,
+                    np.number,
+                ),
+            ):
 
                 st.metric(
-                    str(key).replace("_", " ").title(),
+                    label,
                     f"{float(value):.2f}",
                 )
 
             else:
 
                 st.metric(
-                    str(key).replace("_", " ").title(),
+                    label,
                     str(value),
                 )
 
-elif isinstance(accuracy, (int, float, np.number)):
+
+elif isinstance(
+    accuracy,
+    (
+        int,
+        float,
+        np.number,
+    ),
+):
 
     st.metric(
         "Accuracy Score",
         f"{float(accuracy):.2f}",
     )
 
+
 else:
 
     st.info(
-        "Model accuracy information is not available for this forecast."
+        "Model accuracy information is not available "
+        "for this forecast."
     )
 
 
@@ -911,9 +1030,13 @@ st.markdown(
 
 display_forecast = forecast_df.copy()
 
-display_forecast[forecast_date_column] = (
-    display_forecast[forecast_date_column]
-    .dt.strftime("%Y-%m-%d")
+
+display_forecast[
+    forecast_date_column
+] = (
+    display_forecast[
+        forecast_date_column
+    ].dt.strftime("%Y-%m-%d")
 )
 
 
@@ -943,7 +1066,7 @@ st.download_button(
 
 
 # ============================================================
-# INTERPRETATION
+# AUTOMATIC INTERPRETATION
 # ============================================================
 
 st.markdown(
@@ -954,35 +1077,41 @@ st.markdown(
 
 if not forecast_values.empty:
 
-    if np.isfinite(forecast_change):
+    if np.isfinite(
+        forecast_change
+    ):
 
         if forecast_change > 10:
 
             st.success(
-                f"The forecast indicates an upward movement of approximately "
-                f"{forecast_change:.2f}% from the latest observed value "
-                f"to the end of the forecast horizon."
+                f"The forecast indicates an upward movement "
+                f"of approximately {forecast_change:.2f}% "
+                f"from the latest observed value to the "
+                f"end of the forecast horizon."
             )
 
         elif forecast_change < -10:
 
             st.warning(
-                f"The forecast indicates a downward movement of approximately "
-                f"{abs(forecast_change):.2f}% from the latest observed value "
-                f"to the end of the forecast horizon."
+                f"The forecast indicates a downward movement "
+                f"of approximately {abs(forecast_change):.2f}% "
+                f"from the latest observed value to the "
+                f"end of the forecast horizon."
             )
 
         else:
 
             st.info(
-                f"The forecast indicates relatively stable movement, with "
-                f"an estimated change of {forecast_change:+.2f}% "
-                f"from the latest observed value."
+                f"The forecast indicates relatively stable "
+                f"movement, with an estimated change of "
+                f"{forecast_change:+.2f}% from the latest "
+                f"observed value."
             )
 
     st.caption(
-        "Forecasts are statistical/model-based estimates and should be "
-        "interpreted together with historical patterns and business context."
+        "Forecasts are statistical/model-based estimates "
+        "and should be interpreted together with historical "
+        "patterns and business context."
     )
 
 
@@ -993,5 +1122,6 @@ if not forecast_values.empty:
 st.divider()
 
 st.caption(
-    "InsightAI • AI-Powered Data Analytics & Decision Intelligence Platform"
+    "InsightAI • AI-Powered Data Analytics & "
+    "Decision Intelligence Platform"
 )
