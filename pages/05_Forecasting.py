@@ -23,7 +23,7 @@ st.set_page_config(
 
 
 # ============================================================
-# CUSTOM CSS
+# CSS
 # ============================================================
 
 st.markdown(
@@ -198,7 +198,6 @@ for column in df.columns:
     )
 
     if converted.notna().sum() >= 5:
-
         numeric_columns.append(column)
 
 
@@ -260,29 +259,11 @@ with control3:
 
 try:
 
-    ts_df = prepare_time_series(
+    prepared = prepare_time_series(
         df,
         date_column,
         metric_column,
     )
-
-except TypeError:
-
-    try:
-
-        ts_df = prepare_time_series(
-            df,
-            date_column=date_column,
-            value_column=metric_column,
-        )
-
-    except Exception as exc:
-
-        st.error(
-            f"Unable to prepare the time series: {exc}"
-        )
-
-        st.stop()
 
 except Exception as exc:
 
@@ -293,7 +274,7 @@ except Exception as exc:
     st.stop()
 
 
-if ts_df is None or len(ts_df) < 5:
+if prepared is None or len(prepared) < 5:
 
     st.warning(
         "There are not enough valid historical observations "
@@ -307,36 +288,32 @@ if ts_df is None or len(ts_df) < 5:
 # NORMALIZE PREPARED DATA
 # ============================================================
 
-prepared = ts_df.copy()
+prepared = prepared.copy()
 
 
-# ------------------------------------------------------------
-# Find date column
-# ------------------------------------------------------------
+# Find date column returned by prepare_time_series()
 
-possible_date_cols = [
-    col
-    for col in prepared.columns
+date_candidates = [
+    column
+    for column in prepared.columns
     if (
-        "date" in str(col).lower()
-        or "time" in str(col).lower()
-        or "timestamp" in str(col).lower()
+        "date" in str(column).lower()
+        or "time" in str(column).lower()
+        or "timestamp" in str(column).lower()
     )
 ]
 
 
-if possible_date_cols:
+if date_candidates:
 
-    prepared_date_column = possible_date_cols[0]
+    prepared_date_column = date_candidates[0]
 
 else:
 
     prepared_date_column = prepared.columns[0]
 
 
-# ------------------------------------------------------------
-# Find value column
-# ------------------------------------------------------------
+# Find numeric value column
 
 if metric_column in prepared.columns:
 
@@ -344,36 +321,33 @@ if metric_column in prepared.columns:
 
 else:
 
-    possible_value_columns = [
-        col
-        for col in prepared.columns
+    prepared_numeric_columns = [
+        column
+        for column in prepared.columns
         if pd.api.types.is_numeric_dtype(
-            prepared[col]
+            prepared[column]
         )
     ]
 
-    if possible_value_columns:
-
-        prepared_value_column = possible_value_columns[-1]
-
-    else:
+    if not prepared_numeric_columns:
 
         st.error(
             "Could not identify the numeric value column "
-            "in the prepared time series."
+            "after preparing the time series."
         )
 
         st.stop()
 
+    prepared_value_column = (
+        prepared_numeric_columns[-1]
+    )
 
-# ------------------------------------------------------------
-# Convert types
-# ------------------------------------------------------------
 
 prepared[prepared_date_column] = pd.to_datetime(
     prepared[prepared_date_column],
     errors="coerce",
 )
+
 
 prepared[prepared_value_column] = pd.to_numeric(
     prepared[prepared_value_column],
@@ -397,8 +371,8 @@ prepared = prepared.sort_values(
 if len(prepared) < 5:
 
     st.warning(
-        "Not enough valid observations remain after "
-        "date/value processing."
+        "Not enough valid observations remain after cleaning "
+        "the time series."
     )
 
     st.stop()
@@ -429,7 +403,7 @@ maximum_value = prepared[
 
 
 # ============================================================
-# HISTORICAL KPI CARDS
+# KPI CARDS
 # ============================================================
 
 st.markdown(
@@ -562,10 +536,19 @@ with st.spinner(
     try:
 
         # IMPORTANT:
-        # build_forecast() expects forecast_periods
+        # Existing core.forecasting.py expects:
+        #
+        # build_forecast(
+        #     df,
+        #     date_column,
+        #     value_column,
+        #     forecast_periods
+        # )
 
         forecast_result = build_forecast(
             prepared,
+            prepared_date_column,
+            prepared_value_column,
             forecast_periods=horizon,
         )
 
@@ -657,12 +640,12 @@ forecast_df = forecast_df.copy()
 # ============================================================
 
 forecast_date_candidates = [
-    col
-    for col in forecast_df.columns
+    column
+    for column in forecast_df.columns
     if (
-        "date" in str(col).lower()
-        or "time" in str(col).lower()
-        or "timestamp" in str(col).lower()
+        "date" in str(column).lower()
+        or "time" in str(column).lower()
+        or "timestamp" in str(column).lower()
     )
 ]
 
@@ -685,10 +668,10 @@ else:
 # ============================================================
 
 forecast_numeric_candidates = [
-    col
-    for col in forecast_df.columns
+    column
+    for column in forecast_df.columns
     if pd.api.types.is_numeric_dtype(
-        forecast_df[col]
+        forecast_df[column]
     )
 ]
 
@@ -704,10 +687,10 @@ if not forecast_numeric_candidates:
 
 
 prediction_candidates = [
-    col
-    for col in forecast_numeric_candidates
+    column
+    for column in forecast_numeric_candidates
     if any(
-        word in str(col).lower()
+        word in str(column).lower()
         for word in [
             "forecast",
             "prediction",
@@ -732,13 +715,15 @@ else:
 
 
 # ============================================================
-# CLEAN FORECAST DATA
+# CLEAN FORECAST
 # ============================================================
 
 forecast_df[
     forecast_date_column
 ] = pd.to_datetime(
-    forecast_df[forecast_date_column],
+    forecast_df[
+        forecast_date_column
+    ],
     errors="coerce",
 )
 
@@ -746,7 +731,9 @@ forecast_df[
 forecast_df[
     forecast_value_column
 ] = pd.to_numeric(
-    forecast_df[forecast_value_column],
+    forecast_df[
+        forecast_value_column
+    ],
     errors="coerce",
 )
 
@@ -840,17 +827,11 @@ forecast_values = forecast_df[
 
 if not forecast_values.empty:
 
-    first_forecast = (
-        forecast_values.iloc[0]
-    )
+    first_forecast = forecast_values.iloc[0]
 
-    last_forecast = (
-        forecast_values.iloc[-1]
-    )
+    last_forecast = forecast_values.iloc[-1]
 
-    forecast_average = (
-        forecast_values.mean()
-    )
+    forecast_average = forecast_values.mean()
 
     if latest_value != 0:
 
