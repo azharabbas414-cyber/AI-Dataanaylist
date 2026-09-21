@@ -1,484 +1,1090 @@
-
-import html
+import io
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+)
+from docx import Document
+from docx.shared import Inches, Pt
 
-def build_report_data(
-    df,
-    dataset_name,
-    analysis,
-):
-    """
-    Prepare structured information for the report.
-    """
 
-    health = analysis["health"]
-    classification = analysis["classification"]
+# ============================================================
+# DATA SUMMARY
+# ============================================================
 
-    numeric_summary = analysis["numeric_summary"]
-    categorical_summary = analysis["categorical_summary"]
-    outliers = analysis["outliers"]
-    correlations = analysis["correlations"]
-    findings = analysis["findings"]
+def build_report_data(df):
+    """Build a general-purpose analytics summary."""
+
+    rows = len(df)
+    columns = len(df.columns)
+
+    total_cells = rows * columns
+    missing_cells = int(df.isna().sum().sum())
+    duplicate_rows = int(df.duplicated().sum())
+
+    completeness = (
+        ((total_cells - missing_cells) / total_cells) * 100
+        if total_cells
+        else 100
+    )
+
+    numeric_columns = list(
+        df.select_dtypes(include=np.number).columns
+    )
+
+    categorical_columns = list(
+        df.select_dtypes(
+            include=["object", "category", "bool"]
+        ).columns
+    )
+
+    datetime_columns = list(
+        df.select_dtypes(
+            include=["datetime", "datetimetz"]
+        ).columns
+    )
 
     return {
-        "dataset_name": dataset_name,
-        "generated_at": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
-        "health": health,
-        "classification": classification,
-        "numeric_summary": numeric_summary,
-        "categorical_summary": categorical_summary,
-        "outliers": outliers,
-        "correlations": correlations,
-        "findings": findings,
-        "rows": len(df),
-        "columns": len(df.columns),
+        "rows": rows,
+        "columns": columns,
+        "missing_cells": missing_cells,
+        "duplicate_rows": duplicate_rows,
+        "completeness": completeness,
+        "numeric_columns": numeric_columns,
+        "categorical_columns": categorical_columns,
+        "datetime_columns": datetime_columns,
     }
 
 
-def generate_executive_summary(report_data):
-    """
-    Generate a concise executive summary.
-    """
+# ============================================================
+# EXECUTIVE SUMMARY
+# ============================================================
 
-    health = report_data["health"]
+def generate_executive_summary(df, report_data=None):
 
-    rows = health["rows"]
-    columns = health["columns"]
-    completeness = health["completeness"]
-    quality_score = health["quality_score"]
-    anomaly_count = len(
-        report_data["outliers"]
-    )
+    if report_data is None:
+        report_data = build_report_data(df)
 
     summary = []
 
     summary.append(
-        f"The dataset contains {rows:,} records "
-        f"across {columns:,} columns."
+        f"The dataset contains {report_data['rows']:,} rows "
+        f"and {report_data['columns']:,} columns."
     )
 
     summary.append(
         f"Overall data completeness is "
-        f"{completeness:.1f}% with a calculated "
-        f"quality score of {quality_score:.0f}/100."
+        f"{report_data['completeness']:.1f}%."
     )
 
-    if anomaly_count > 0:
+    if report_data["missing_cells"]:
+
         summary.append(
-            f"The analytics engine identified "
-            f"{anomaly_count:,} columns containing "
-            f"potential statistical outliers."
+            f"There are {report_data['missing_cells']:,} "
+            f"missing cells requiring review."
         )
+
     else:
+
         summary.append(
-            "No statistical outlier groups were identified."
+            "No missing cells were detected."
         )
 
-    return " ".join(summary)
+    if report_data["duplicate_rows"]:
+
+        summary.append(
+            f"{report_data['duplicate_rows']:,} duplicate rows "
+            f"were identified."
+        )
+
+    else:
+
+        summary.append(
+            "No duplicate rows were identified."
+        )
+
+    if report_data["numeric_columns"]:
+
+        summary.append(
+            f"The dataset contains "
+            f"{len(report_data['numeric_columns'])} numeric fields."
+        )
+
+    if report_data["categorical_columns"]:
+
+        summary.append(
+            f"The dataset contains "
+            f"{len(report_data['categorical_columns'])} categorical fields."
+        )
+
+    return summary
 
 
-def dataframe_to_html(
-    dataframe,
-    max_rows=20,
+# ============================================================
+# FINDINGS
+# ============================================================
+
+def generate_report_findings(df):
+
+    findings = []
+
+    missing = df.isna().sum()
+
+    missing = missing[missing > 0]
+
+    if not missing.empty:
+
+        top_missing = missing.sort_values(
+            ascending=False
+        ).head(5)
+
+        for column, count in top_missing.items():
+
+            percentage = (
+                count / len(df) * 100
+                if len(df)
+                else 0
+            )
+
+            findings.append(
+                f"{column} contains {count:,} missing values "
+                f"({percentage:.1f}% of rows)."
+            )
+
+    duplicates = int(df.duplicated().sum())
+
+    if duplicates:
+
+        findings.append(
+            f"The dataset contains {duplicates:,} duplicate rows."
+        )
+
+    for column in df.select_dtypes(
+        include=np.number
+    ).columns:
+
+        values = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        ).dropna()
+
+        if len(values) < 5:
+            continue
+
+        q1 = values.quantile(0.25)
+        q3 = values.quantile(0.75)
+
+        iqr = q3 - q1
+
+        if iqr == 0:
+            continue
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        outlier_count = int(
+            ((values < lower) | (values > upper)).sum()
+        )
+
+        if outlier_count:
+
+            findings.append(
+                f"{column} contains approximately "
+                f"{outlier_count:,} potential statistical outliers."
+            )
+
+    if not findings:
+
+        findings.append(
+            "No major automatic data-quality findings were identified."
+        )
+
+    return findings
+
+
+# ============================================================
+# NUMERIC STATISTICS
+# ============================================================
+
+def numeric_statistics(df):
+
+    numeric_df = df.select_dtypes(
+        include=np.number
+    )
+
+    if numeric_df.empty:
+        return pd.DataFrame()
+
+    return numeric_df.describe().T.reset_index().rename(
+        columns={"index": "Column"}
+    )
+
+
+# ============================================================
+# CATEGORY SUMMARY
+# ============================================================
+
+def categorical_statistics(df):
+
+    results = []
+
+    for column in df.select_dtypes(
+        include=["object", "category", "bool"]
+    ).columns:
+
+        results.append(
+            {
+                "Column": column,
+                "Unique Values": int(
+                    df[column].nunique(dropna=True)
+                ),
+                "Missing": int(
+                    df[column].isna().sum()
+                ),
+                "Top Value": (
+                    df[column]
+                    .value_counts(dropna=True)
+                    .index[0]
+                    if not df[column]
+                    .value_counts(dropna=True)
+                    .empty
+                    else ""
+                ),
+            }
+        )
+
+    return pd.DataFrame(results)
+
+
+# ============================================================
+# CORRELATION SUMMARY
+# ============================================================
+
+def correlation_summary(df):
+
+    numeric_df = df.select_dtypes(
+        include=np.number
+    )
+
+    if numeric_df.shape[1] < 2:
+        return pd.DataFrame()
+
+    corr = numeric_df.corr()
+
+    pairs = []
+
+    columns = list(corr.columns)
+
+    for i in range(len(columns)):
+
+        for j in range(i + 1, len(columns)):
+
+            value = corr.iloc[i, j]
+
+            if pd.notna(value):
+
+                pairs.append(
+                    {
+                        "Field 1": columns[i],
+                        "Field 2": columns[j],
+                        "Correlation": round(float(value), 3),
+                    }
+                )
+
+    result = pd.DataFrame(pairs)
+
+    if not result.empty:
+
+        result["Absolute"] = result["Correlation"].abs()
+
+        result = result.sort_values(
+            "Absolute",
+            ascending=False
+        ).drop(
+            columns=["Absolute"]
+        )
+
+    return result
+
+
+# ============================================================
+# PDF HELPERS
+# ============================================================
+
+def _pdf_table(data, widths=None):
+
+    table = Table(
+        data,
+        colWidths=widths,
+        repeatRows=1,
+    )
+
+    table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.HexColor("#1e293b"),
+                ),
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (-1, 0),
+                    colors.white,
+                ),
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold",
+                ),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.4,
+                    colors.HexColor("#cbd5e1"),
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP",
+                ),
+                (
+                    "FONTSIZE",
+                    (0, 0),
+                    (-1, -1),
+                    8,
+                ),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [
+                        colors.white,
+                        colors.HexColor("#f8fafc"),
+                    ],
+                ),
+            ]
+        )
+    )
+
+    return table
+
+
+def _safe_text(value):
+
+    if pd.isna(value):
+        return ""
+
+    return str(value)
+
+
+# ============================================================
+# PDF REPORT
+# ============================================================
+
+def generate_pdf_report(
+    df,
+    dataset_name="InsightAI Dataset",
 ):
-    """
-    Convert a DataFrame into an HTML table.
-    """
 
-    if dataframe is None or dataframe.empty:
-        return "<p>No data available.</p>"
+    report_data = build_report_data(df)
 
-    display_df = dataframe.head(max_rows).copy()
+    buffer = io.BytesIO()
 
-    return display_df.to_html(
-        index=False,
-        classes="data-table",
-        border=0,
-        escape=True,
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36,
     )
 
+    styles = getSampleStyleSheet()
 
-def generate_html_report(report_data):
-    """
-    Generate a complete HTML report.
-    """
-
-    dataset_name = html.escape(
-        str(report_data["dataset_name"])
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontSize=24,
+        leading=28,
+        alignment=TA_CENTER,
+        spaceAfter=18,
     )
 
-    generated_at = html.escape(
-        str(report_data["generated_at"])
+    heading_style = ParagraphStyle(
+        "ReportHeading",
+        parent=styles["Heading2"],
+        fontSize=15,
+        leading=19,
+        spaceBefore=14,
+        spaceAfter=8,
     )
 
-    health = report_data["health"]
+    body_style = ParagraphStyle(
+        "ReportBody",
+        parent=styles["BodyText"],
+        fontSize=9.5,
+        leading=14,
+        spaceAfter=6,
+    )
 
-    classification = report_data[
-        "classification"
+    story = []
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "InsightAI Analytics Report",
+            title_style,
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"<b>Dataset:</b> {_safe_text(dataset_name)}",
+            body_style,
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"<b>Generated:</b> "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            body_style,
+        )
+    )
+
+    story.append(Spacer(1, 12))
+
+    # --------------------------------------------------------
+    # KPI TABLE
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Executive Overview",
+            heading_style,
+        )
+    )
+
+    kpi_data = [
+        ["Metric", "Value"],
+        ["Rows", f"{report_data['rows']:,}"],
+        ["Columns", f"{report_data['columns']:,}"],
+        [
+            "Completeness",
+            f"{report_data['completeness']:.1f}%",
+        ],
+        [
+            "Missing Cells",
+            f"{report_data['missing_cells']:,}",
+        ],
+        [
+            "Duplicate Rows",
+            f"{report_data['duplicate_rows']:,}",
+        ],
     ]
 
-    findings = report_data["findings"]
-
-    executive_summary = generate_executive_summary(
-        report_data
+    story.append(
+        _pdf_table(
+            kpi_data,
+            widths=[3.2 * inch, 2.5 * inch],
+        )
     )
 
-    numeric_summary = dataframe_to_html(
-        report_data["numeric_summary"],
-        max_rows=20,
+    story.append(Spacer(1, 12))
+
+    # --------------------------------------------------------
+    # EXECUTIVE SUMMARY
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Executive Summary",
+            heading_style,
+        )
     )
 
-    categorical_summary = dataframe_to_html(
-        report_data["categorical_summary"],
-        max_rows=20,
+    for item in generate_executive_summary(
+        df,
+        report_data,
+    ):
+
+        story.append(
+            Paragraph(
+                f"• {_safe_text(item)}",
+                body_style,
+            )
+        )
+
+    # --------------------------------------------------------
+    # FINDINGS
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Key Findings",
+            heading_style,
+        )
     )
 
-    outliers = dataframe_to_html(
-        report_data["outliers"],
-        max_rows=20,
+    for finding in generate_report_findings(df):
+
+        story.append(
+            Paragraph(
+                f"• {_safe_text(finding)}",
+                body_style,
+            )
+        )
+
+    # --------------------------------------------------------
+    # DATA STRUCTURE
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Data Structure",
+            heading_style,
+        )
     )
 
-    correlations = dataframe_to_html(
-        report_data["correlations"],
-        max_rows=20,
+    structure_data = [
+        [
+            "Column",
+            "Data Type",
+            "Missing",
+            "Unique",
+        ]
+    ]
+
+    for column in df.columns:
+
+        structure_data.append(
+            [
+                str(column),
+                str(df[column].dtype),
+                str(int(df[column].isna().sum())),
+                str(int(df[column].nunique(dropna=True))),
+            ]
+        )
+
+    story.append(
+        _pdf_table(
+            structure_data,
+            widths=[
+                2.0 * inch,
+                1.4 * inch,
+                1.0 * inch,
+                1.0 * inch,
+            ],
+        )
     )
 
-    findings_html = ""
+    story.append(PageBreak())
 
-    if findings:
+    # --------------------------------------------------------
+    # NUMERIC STATISTICS
+    # --------------------------------------------------------
 
-        for finding in findings:
+    story.append(
+        Paragraph(
+            "Numeric Statistics",
+            heading_style,
+        )
+    )
 
-            findings_html += (
-                f"<li>{html.escape(str(finding))}</li>"
+    stats = numeric_statistics(df)
+
+    if not stats.empty:
+
+        columns = [
+            "Column",
+            "count",
+            "mean",
+            "std",
+            "min",
+            "max",
+        ]
+
+        columns = [
+            col for col in columns
+            if col in stats.columns
+        ]
+
+        stats_data = [
+            columns
+        ]
+
+        for _, row in stats[columns].head(30).iterrows():
+
+            stats_data.append(
+                [
+                    _safe_text(row[col])
+                    for col in columns
+                ]
+            )
+
+        story.append(
+            _pdf_table(
+                stats_data
+            )
+        )
+
+    else:
+
+        story.append(
+            Paragraph(
+                "No numeric columns were detected.",
+                body_style,
+            )
+        )
+
+    # --------------------------------------------------------
+    # CATEGORICAL ANALYSIS
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Categorical Analysis",
+            heading_style,
+        )
+    )
+
+    categories = categorical_statistics(df)
+
+    if not categories.empty:
+
+        category_data = [
+            list(categories.columns)
+        ]
+
+        for _, row in categories.head(30).iterrows():
+
+            category_data.append(
+                [
+                    _safe_text(row[col])
+                    for col in categories.columns
+                ]
+            )
+
+        story.append(
+            _pdf_table(
+                category_data
+            )
+        )
+
+    else:
+
+        story.append(
+            Paragraph(
+                "No categorical columns were detected.",
+                body_style,
+            )
+        )
+
+    # --------------------------------------------------------
+    # CORRELATIONS
+    # --------------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "Strongest Correlations",
+            heading_style,
+        )
+    )
+
+    correlations = correlation_summary(df)
+
+    if not correlations.empty:
+
+        correlation_data = [
+            list(correlations.columns)
+        ]
+
+        for _, row in correlations.head(20).iterrows():
+
+            correlation_data.append(
+                [
+                    _safe_text(row[col])
+                    for col in correlations.columns
+                ]
+            )
+
+        story.append(
+            _pdf_table(
+                correlation_data
+            )
+        )
+
+    else:
+
+        story.append(
+            Paragraph(
+                "Insufficient numeric fields for correlation analysis.",
+                body_style,
+            )
+        )
+
+    # --------------------------------------------------------
+    # FOOTER
+    # --------------------------------------------------------
+
+    story.append(Spacer(1, 18))
+
+    story.append(
+        Paragraph(
+            "Generated by InsightAI — AI-Powered Data Analytics & Decision Intelligence Platform",
+            body_style,
+        )
+    )
+
+    document.build(story)
+
+    buffer.seek(0)
+
+    return buffer.getvalue()
+
+
+# ============================================================
+# DOCX REPORT
+# ============================================================
+
+def generate_docx_report(
+    df,
+    dataset_name="InsightAI Dataset",
+):
+
+    report_data = build_report_data(df)
+
+    document = Document()
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
+    title = document.add_heading(
+        "InsightAI Analytics Report",
+        level=0,
+    )
+
+    title.alignment = 1
+
+    document.add_paragraph(
+        f"Dataset: {dataset_name}"
+    )
+
+    document.add_paragraph(
+        f"Generated: "
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    # --------------------------------------------------------
+    # EXECUTIVE OVERVIEW
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Executive Overview",
+        level=1,
+    )
+
+    table = document.add_table(
+        rows=1,
+        cols=2,
+    )
+
+    table.style = "Table Grid"
+
+    table.rows[0].cells[0].text = "Metric"
+    table.rows[0].cells[1].text = "Value"
+
+    kpis = [
+        (
+            "Rows",
+            f"{report_data['rows']:,}",
+        ),
+        (
+            "Columns",
+            f"{report_data['columns']:,}",
+        ),
+        (
+            "Completeness",
+            f"{report_data['completeness']:.1f}%",
+        ),
+        (
+            "Missing Cells",
+            f"{report_data['missing_cells']:,}",
+        ),
+        (
+            "Duplicate Rows",
+            f"{report_data['duplicate_rows']:,}",
+        ),
+    ]
+
+    for metric, value in kpis:
+
+        cells = table.add_row().cells
+
+        cells[0].text = metric
+        cells[1].text = value
+
+    # --------------------------------------------------------
+    # EXECUTIVE SUMMARY
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Executive Summary",
+        level=1,
+    )
+
+    for item in generate_executive_summary(
+        df,
+        report_data,
+    ):
+
+        document.add_paragraph(
+            item,
+            style="List Bullet",
+        )
+
+    # --------------------------------------------------------
+    # FINDINGS
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Key Findings",
+        level=1,
+    )
+
+    for finding in generate_report_findings(df):
+
+        document.add_paragraph(
+            finding,
+            style="List Bullet",
+        )
+
+    # --------------------------------------------------------
+    # DATA STRUCTURE
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Data Structure",
+        level=1,
+    )
+
+    structure_table = document.add_table(
+        rows=1,
+        cols=4,
+    )
+
+    structure_table.style = "Table Grid"
+
+    headers = [
+        "Column",
+        "Data Type",
+        "Missing",
+        "Unique",
+    ]
+
+    for i, header in enumerate(headers):
+
+        structure_table.rows[0].cells[i].text = header
+
+    for column in df.columns:
+
+        cells = structure_table.add_row().cells
+
+        cells[0].text = str(column)
+        cells[1].text = str(df[column].dtype)
+        cells[2].text = str(
+            int(df[column].isna().sum())
+        )
+        cells[3].text = str(
+            int(df[column].nunique(dropna=True))
+        )
+
+    # --------------------------------------------------------
+    # NUMERIC STATISTICS
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Numeric Statistics",
+        level=1,
+    )
+
+    stats = numeric_statistics(df)
+
+    if not stats.empty:
+
+        selected_columns = [
+            "Column",
+            "count",
+            "mean",
+            "std",
+            "min",
+            "max",
+        ]
+
+        selected_columns = [
+            col for col in selected_columns
+            if col in stats.columns
+        ]
+
+        stats_table = document.add_table(
+            rows=1,
+            cols=len(selected_columns),
+        )
+
+        stats_table.style = "Table Grid"
+
+        for i, col in enumerate(selected_columns):
+
+            stats_table.rows[0].cells[i].text = col
+
+        for _, row in stats[selected_columns].head(30).iterrows():
+
+            cells = stats_table.add_row().cells
+
+            for i, col in enumerate(selected_columns):
+
+                cells[i].text = _safe_text(
+                    row[col]
+                )
+
+    else:
+
+        document.add_paragraph(
+            "No numeric columns were detected."
+        )
+
+    # --------------------------------------------------------
+    # CATEGORICAL ANALYSIS
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Categorical Analysis",
+        level=1,
+    )
+
+    categories = categorical_statistics(df)
+
+    if not categories.empty:
+
+        category_table = document.add_table(
+            rows=1,
+            cols=len(categories.columns),
+        )
+
+        category_table.style = "Table Grid"
+
+        for i, col in enumerate(categories.columns):
+
+            category_table.rows[0].cells[i].text = col
+
+        for _, row in categories.head(30).iterrows():
+
+            cells = category_table.add_row().cells
+
+            for i, col in enumerate(categories.columns):
+
+                cells[i].text = _safe_text(
+                    row[col]
+                )
+
+    else:
+
+        document.add_paragraph(
+            "No categorical columns were detected."
+        )
+
+    # --------------------------------------------------------
+    # CORRELATIONS
+    # --------------------------------------------------------
+
+    document.add_heading(
+        "Strongest Correlations",
+        level=1,
+    )
+
+    correlations = correlation_summary(df)
+
+    if not correlations.empty:
+
+        corr_table = document.add_table(
+            rows=1,
+            cols=3,
+        )
+
+        corr_table.style = "Table Grid"
+
+        headers = [
+            "Field 1",
+            "Field 2",
+            "Correlation",
+        ]
+
+        for i, header in enumerate(headers):
+
+            corr_table.rows[0].cells[i].text = header
+
+        for _, row in correlations.head(20).iterrows():
+
+            cells = corr_table.add_row().cells
+
+            cells[0].text = _safe_text(
+                row["Field 1"]
+            )
+
+            cells[1].text = _safe_text(
+                row["Field 2"]
+            )
+
+            cells[2].text = _safe_text(
+                row["Correlation"]
             )
 
     else:
 
-        findings_html = (
-            "<li>No automatic findings were generated.</li>"
+        document.add_paragraph(
+            "Insufficient numeric fields for correlation analysis."
         )
 
-    numeric_columns = ", ".join(
-        str(column)
-        for column in classification["numeric"]
-    )
+    # --------------------------------------------------------
+    # FOOTER
+    # --------------------------------------------------------
 
-    categorical_columns = ", ".join(
-        str(column)
-        for column in classification["categorical"]
-    )
+    document.add_paragraph("")
 
-    datetime_columns = ", ".join(
-        str(column)
-        for column in classification["datetime"]
-    )
+    footer = document.add_paragraph()
 
-    report_html = f"""
-<!DOCTYPE html>
+    footer.add_run(
+        "Generated by InsightAI — AI-Powered Data Analytics "
+        "& Decision Intelligence Platform"
+    ).bold = True
 
-<html>
+    buffer = io.BytesIO()
 
-<head>
+    document.save(buffer)
 
-<meta charset="UTF-8">
+    buffer.seek(0)
 
-<title>InsightAI Report - {dataset_name}</title>
-
-<style>
-
-body {{
-    font-family: Arial, Helvetica, sans-serif;
-    margin: 0;
-    padding: 0;
-    background: #f5f7fa;
-    color: #1e293b;
-}}
-
-.container {{
-    max-width: 1100px;
-    margin: 40px auto;
-    background: white;
-    padding: 45px;
-    box-shadow: 0 5px 25px rgba(0,0,0,0.08);
-}}
-
-.header {{
-    border-bottom: 3px solid #334155;
-    padding-bottom: 25px;
-    margin-bottom: 30px;
-}}
-
-.logo {{
-    font-size: 32px;
-    font-weight: 800;
-}}
-
-.subtitle {{
-    color: #64748b;
-    font-size: 15px;
-}}
-
-h1 {{
-    font-size: 30px;
-}}
-
-h2 {{
-    margin-top: 35px;
-    border-bottom: 1px solid #e2e8f0;
-    padding-bottom: 8px;
-}}
-
-.summary {{
-    background: #f1f5f9;
-    padding: 20px;
-    border-radius: 10px;
-    line-height: 1.7;
-}}
-
-.kpi-container {{
-    display: flex;
-    gap: 15px;
-    margin: 25px 0;
-}}
-
-.kpi {{
-    flex: 1;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 18px;
-}}
-
-.kpi-title {{
-    color: #64748b;
-    font-size: 13px;
-}}
-
-.kpi-value {{
-    font-size: 25px;
-    font-weight: 700;
-    margin-top: 5px;
-}}
-
-.data-table {{
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 15px;
-    font-size: 13px;
-}}
-
-.data-table th {{
-    background: #e2e8f0;
-    text-align: left;
-    padding: 9px;
-}}
-
-.data-table td {{
-    border-bottom: 1px solid #e2e8f0;
-    padding: 8px;
-}}
-
-ul {{
-    line-height: 1.8;
-}}
-
-.footer {{
-    margin-top: 50px;
-    padding-top: 20px;
-    border-top: 1px solid #e2e8f0;
-    color: #64748b;
-    font-size: 12px;
-}}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="container">
-
-<div class="header">
-
-<div class="logo">
-InsightAI
-</div>
-
-<div class="subtitle">
-AI-Powered Data Analytics & Decision Intelligence
-</div>
-
-<h1>
-Data Analytics Report
-</h1>
-
-<p>
-<strong>Dataset:</strong> {dataset_name}
-</p>
-
-<p>
-<strong>Generated:</strong> {generated_at}
-</p>
-
-</div>
-
-
-<h2>Executive Summary</h2>
-
-<div class="summary">
-
-{html.escape(executive_summary)}
-
-</div>
-
-
-<div class="kpi-container">
-
-<div class="kpi">
-
-<div class="kpi-title">
-Rows
-</div>
-
-<div class="kpi-value">
-{health["rows"]:,}
-</div>
-
-</div>
-
-
-<div class="kpi">
-
-<div class="kpi-title">
-Columns
-</div>
-
-<div class="kpi-value">
-{health["columns"]:,}
-</div>
-
-</div>
-
-
-<div class="kpi">
-
-<div class="kpi-title">
-Completeness
-</div>
-
-<div class="kpi-value">
-{health["completeness"]:.1f}%
-</div>
-
-</div>
-
-
-<div class="kpi">
-
-<div class="kpi-title">
-Quality Score
-</div>
-
-<div class="kpi-value">
-{health["quality_score"]:.0f}/100
-</div>
-
-</div>
-
-</div>
-
-
-<h2>Dataset Structure</h2>
-
-<p>
-<strong>Numeric Fields:</strong>
-{html.escape(numeric_columns or "None")}
-</p>
-
-<p>
-<strong>Categorical Fields:</strong>
-{html.escape(categorical_columns or "None")}
-</p>
-
-<p>
-<strong>Date/Time Fields:</strong>
-{html.escape(datetime_columns or "None")}
-</p>
-
-
-<h2>Data Quality</h2>
-
-<ul>
-
-<li>
-Missing values:
-{health["missing_values"]:,}
-</li>
-
-<li>
-Duplicate rows:
-{health["duplicate_rows"]:,}
-</li>
-
-<li>
-Completeness:
-{health["completeness"]:.2f}%
-</li>
-
-<li>
-Duplicate percentage:
-{health["duplicate_percentage"]:.2f}%
-</li>
-
-</ul>
-
-
-<h2>Key Findings</h2>
-
-<ul>
-
-{findings_html}
-
-</ul>
-
-
-<h2>Numeric Statistics</h2>
-
-{numeric_summary}
-
-
-<h2>Categorical Analysis</h2>
-
-{categorical_summary}
-
-
-<h2>Potential Outliers</h2>
-
-{outliers}
-
-
-<h2>Strongest Relationships</h2>
-
-{correlations}
-
-
-<div class="footer">
-
-InsightAI • AI-Powered Data Analytics Platform
-
-</div>
-
-</div>
-
-</body>
-
-</html>
-"""
-
-    return report_html
+    return buffer.getvalue()
