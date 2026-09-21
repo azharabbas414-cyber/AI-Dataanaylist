@@ -1,455 +1,456 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 
 from core.analytics import analyze_dataset
 
 
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 
 st.set_page_config(
-    page_title="InsightAI - Dashboard",
-    page_icon="📈",
+    page_title="InsightAI | Dashboard",
+    page_icon="📊",
     layout="wide",
 )
 
 
-# =========================================================
-# ACTIVE DATASET CHECK
-# =========================================================
+# ============================================================
+# CUSTOM CSS
+# ============================================================
 
-if (
-    "active_dataframe" not in st.session_state
-    or st.session_state.active_dataframe is None
-):
+st.markdown(
+    """
+    <style>
 
+    .dashboard-header {
+        padding: 24px 28px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        background: linear-gradient(
+            135deg,
+            rgba(37, 99, 235, 0.14),
+            rgba(99, 102, 241, 0.08)
+        );
+        border: 1px solid rgba(100, 116, 139, 0.18);
+    }
+
+    .dashboard-header h1 {
+        margin: 0;
+        font-size: 32px;
+        font-weight: 700;
+    }
+
+    .dashboard-header p {
+        margin-top: 8px;
+        color: #64748b;
+        font-size: 15px;
+    }
+
+    .section-title {
+        font-size: 21px;
+        font-weight: 700;
+        margin-top: 26px;
+        margin-bottom: 12px;
+    }
+
+    .kpi-card {
+        padding: 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(100, 116, 139, 0.18);
+        background: rgba(255, 255, 255, 0.03);
+        min-height: 115px;
+    }
+
+    .kpi-label {
+        font-size: 13px;
+        color: #64748b;
+        margin-bottom: 8px;
+    }
+
+    .kpi-value {
+        font-size: 27px;
+        font-weight: 700;
+    }
+
+    .insight-card {
+        padding: 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(100, 116, 139, 0.18);
+        margin-bottom: 10px;
+    }
+
+    .small-muted {
+        color: #64748b;
+        font-size: 13px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# CHECK ACTIVE DATASET
+# ============================================================
+
+if "active_dataframe" not in st.session_state:
+    st.session_state.active_dataframe = None
+
+if st.session_state.active_dataframe is None:
     st.warning(
-        "No active dataset is selected."
+        "No active dataset found. Please select or upload a dataset from the Home page."
     )
 
-    st.info(
-        "Return to Home and select or upload a dataset."
-    )
-
-    if st.button("🏠 Go to Home"):
-
-        st.switch_page(
-            "streamlitapp.py"
-        )
+    if st.button("🏠 Go to Home", type="primary"):
+        st.switch_page("streamlitapp.py")
 
     st.stop()
 
 
-# =========================================================
-# DATA
-# =========================================================
+df = st.session_state.active_dataframe.copy()
 
-df = st.session_state.active_dataframe
-
-dataset_name = st.session_state.get(
-    "active_dataset",
-    "Dataset",
-)
-
-dataset_source = st.session_state.get(
-    "active_source",
-    "Unknown",
-)
+if df.empty:
+    st.warning("The active dataset is empty.")
+    st.stop()
 
 
-# =========================================================
-# ANALYTICS ENGINE
-# =========================================================
+# ============================================================
+# ANALYSIS
+# ============================================================
 
 analysis = analyze_dataset(df)
 
-health = analysis["health"]
+classification = analysis.get("classification", {})
 
-classification = analysis[
-    "classification"
-]
-
-numeric_summary = analysis[
-    "numeric_summary"
-]
-
-categorical_summary = analysis[
-    "categorical_summary"
-]
-
-outliers = analysis[
-    "outliers"
-]
-
-correlations = analysis[
-    "correlations"
-]
-
-findings = analysis[
-    "findings"
-]
+numeric_columns = classification.get("numeric", [])
+categorical_columns = classification.get("categorical", [])
+datetime_columns = classification.get("datetime", [])
 
 
-# =========================================================
-# CUSTOM CSS
-# =========================================================
-
-st.markdown(
-    """
-<style>
-
-.dashboard-header {
-    padding: 28px 32px;
-    border-radius: 18px;
-    background: linear-gradient(
-        135deg,
-        #eef2ff,
-        #f8fafc
-    );
-    border: 1px solid #e2e8f0;
-    margin-bottom: 25px;
-}
-
-.dashboard-title {
-    font-size: 38px;
-    font-weight: 800;
-    color: #1e293b;
-}
-
-.dashboard-subtitle {
-    color: #64748b;
-    font-size: 15px;
-    margin-top: 5px;
-}
-
-.kpi-card {
-    padding: 20px;
-    border-radius: 16px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    min-height: 120px;
-}
-
-.kpi-label {
-    color: #64748b;
-    font-size: 13px;
-    font-weight: 600;
-}
-
-.kpi-value {
-    color: #0f172a;
-    font-size: 30px;
-    font-weight: 800;
-    margin-top: 8px;
-}
-
-.section-card {
-    padding: 20px;
-    border-radius: 16px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-}
-
-.insight-card {
-    padding: 16px 20px;
-    border-radius: 12px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    margin-bottom: 10px;
-}
-
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
+# ============================================================
 # HEADER
-# =========================================================
+# ============================================================
 
 st.markdown(
     f"""
-<div class="dashboard-header">
-
-<div class="dashboard-title">
-📈 Executive Dashboard
-</div>
-
-<div class="dashboard-subtitle">
-Automated visual analytics for
-<strong>{dataset_name}</strong>
-</div>
-
-<div class="dashboard-subtitle">
-Source: {dataset_source}
-</div>
-
-</div>
-""",
+    <div class="dashboard-header">
+        <h1>📊 Analytics Dashboard</h1>
+        <p>
+            Interactive overview of
+            <b>{st.session_state.get("active_dataset", "Active Dataset")}</b>
+            using {len(df):,} rows and {len(df.columns):,} columns.
+        </p>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
 
-# =========================================================
-# KPI CARDS
-# =========================================================
+# ============================================================
+# KPI SECTION
+# ============================================================
 
-kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+st.markdown('<div class="section-title">📌 Dataset Overview</div>', unsafe_allow_html=True)
 
+total_cells = df.shape[0] * df.shape[1]
+missing_cells = int(df.isna().sum().sum())
+
+if total_cells > 0:
+    completeness = ((total_cells - missing_cells) / total_cells) * 100
+else:
+    completeness = 100
+
+duplicate_rows = int(df.duplicated().sum())
+
+numeric_count = len(numeric_columns)
+categorical_count = len(categorical_columns)
+
+kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
 
 with kpi1:
-
     st.markdown(
         f"""
-<div class="kpi-card">
-
-<div class="kpi-label">
-TOTAL RECORDS
-</div>
-
-<div class="kpi-value">
-{health["rows"]:,}
-</div>
-
-</div>
-""",
+        <div class="kpi-card">
+            <div class="kpi-label">Rows</div>
+            <div class="kpi-value">{len(df):,}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-
 
 with kpi2:
-
     st.markdown(
         f"""
-<div class="kpi-card">
-
-<div class="kpi-label">
-COLUMNS
-</div>
-
-<div class="kpi-value">
-{health["columns"]:,}
-</div>
-
-</div>
-""",
+        <div class="kpi-card">
+            <div class="kpi-label">Columns</div>
+            <div class="kpi-value">{len(df.columns):,}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-
 
 with kpi3:
-
     st.markdown(
         f"""
-<div class="kpi-card">
-
-<div class="kpi-label">
-DATA COMPLETENESS
-</div>
-
-<div class="kpi-value">
-{health["completeness"]:.1f}%
-</div>
-
-</div>
-""",
+        <div class="kpi-card">
+            <div class="kpi-label">Numeric Fields</div>
+            <div class="kpi-value">{numeric_count:,}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-
 
 with kpi4:
-
     st.markdown(
         f"""
-<div class="kpi-card">
-
-<div class="kpi-label">
-MISSING VALUES
-</div>
-
-<div class="kpi-value">
-{health["missing_values"]:,}
-</div>
-
-</div>
-""",
+        <div class="kpi-card">
+            <div class="kpi-label">Category Fields</div>
+            <div class="kpi-value">{categorical_count:,}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-
 
 with kpi5:
-
     st.markdown(
         f"""
-<div class="kpi-card">
+        <div class="kpi-card">
+            <div class="kpi-label">Completeness</div>
+            <div class="kpi-value">{completeness:.1f}%</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-<div class="kpi-label">
-QUALITY SCORE
-</div>
-
-<div class="kpi-value">
-{health["quality_score"]:.0f}/100
-</div>
-
-</div>
-""",
+with kpi6:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-label">Duplicates</div>
+            <div class="kpi-value">{duplicate_rows:,}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
 
-st.write("")
-
-
-# =========================================================
+# ============================================================
 # DATASET SNAPSHOT
-# =========================================================
+# ============================================================
 
-st.subheader(
-    "📊 Dataset Snapshot"
-)
+st.markdown('<div class="section-title">🔎 Dataset Snapshot</div>', unsafe_allow_html=True)
 
-snapshot_col1, snapshot_col2, snapshot_col3 = (
-    st.columns(3)
-)
-
+snapshot_col1, snapshot_col2 = st.columns([1.5, 1])
 
 with snapshot_col1:
 
-    st.metric(
-        "Numeric Fields",
-        len(
-            classification[
-                "numeric"
-            ]
-        ),
-    )
+    preview_columns = list(df.columns[:8])
 
+    st.dataframe(
+        df[preview_columns].head(10),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 with snapshot_col2:
 
-    st.metric(
-        "Categorical Fields",
-        len(
-            classification[
-                "categorical"
-            ]
-        ),
+    structure_data = []
+
+    for column in df.columns:
+        structure_data.append(
+            {
+                "Column": column,
+                "Type": str(df[column].dtype),
+                "Missing": int(df[column].isna().sum()),
+                "Unique": int(df[column].nunique(dropna=True)),
+            }
+        )
+
+    structure_df = pd.DataFrame(structure_data)
+
+    st.dataframe(
+        structure_df,
+        use_container_width=True,
+        hide_index=True,
+        height=330,
     )
 
 
-with snapshot_col3:
+# ============================================================
+# PIE CHARTS
+# ============================================================
 
-    st.metric(
-        "Date Fields",
-        len(
-            classification[
-                "datetime"
-            ]
-        ),
-    )
-
-
-# =========================================================
-# TREND ANALYSIS
-# =========================================================
-
-st.divider()
-
-st.subheader(
-    "📈 Trend Analysis"
+st.markdown(
+    '<div class="section-title">🥧 Composition Analysis</div>',
+    unsafe_allow_html=True,
 )
 
-datetime_columns = list(
-    classification["datetime"]
-)
-
-numeric_columns = list(
-    classification["numeric"]
-)
+pie_col1, pie_col2 = st.columns(2)
 
 
-if datetime_columns and numeric_columns:
+# ------------------------------------------------------------
+# PIE 1 — CATEGORY DISTRIBUTION
+# ------------------------------------------------------------
 
-    trend_col1, trend_col2 = st.columns(
-        [1, 3]
-    )
+with pie_col1:
 
-    with trend_col1:
+    if categorical_columns:
 
-        selected_date = st.selectbox(
-            "Date / Time",
-            datetime_columns,
-            key="dashboard_date_column",
+        selected_category = st.selectbox(
+            "Category",
+            categorical_columns,
+            key="dashboard_pie_category",
+        )
+
+        category_counts = (
+            df[selected_category]
+            .fillna("Missing")
+            .astype(str)
+            .value_counts()
+            .reset_index()
+        )
+
+        category_counts.columns = ["Category", "Count"]
+
+        # Keep pie charts readable
+        if len(category_counts) > 8:
+
+            top_values = category_counts.head(7).copy()
+
+            other_count = category_counts.iloc[7:]["Count"].sum()
+
+            if other_count > 0:
+                top_values.loc[len(top_values)] = [
+                    "Other",
+                    other_count,
+                ]
+
+            category_counts = top_values
+
+        fig = px.pie(
+            category_counts,
+            names="Category",
+            values="Count",
+            hole=0.42,
+            title=f"Distribution of {selected_category}",
+        )
+
+        fig.update_layout(
+            height=400,
+            margin=dict(l=20, r=20, t=60, b=20),
+            legend_title_text="",
+        )
+
+        fig.update_traces(
+            textposition="inside",
+            textinfo="percent+label",
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+        )
+
+    else:
+
+        st.info(
+            "No categorical columns are available for a distribution pie chart."
+        )
+
+
+# ------------------------------------------------------------
+# PIE 2 — NUMERIC CONTRIBUTION BY CATEGORY
+# ------------------------------------------------------------
+
+with pie_col2:
+
+    if categorical_columns and numeric_columns:
+
+        selected_category_2 = st.selectbox(
+            "Category for contribution",
+            categorical_columns,
+            key="dashboard_pie_category_2",
         )
 
         selected_metric = st.selectbox(
-            "Metric",
+            "Numeric metric",
             numeric_columns,
-            key="dashboard_trend_metric",
+            key="dashboard_pie_metric",
         )
 
-    with trend_col2:
-
-        trend_df = df[
-            [
-                selected_date,
-                selected_metric,
-            ]
+        contribution_df = df[
+            [selected_category_2, selected_metric]
         ].copy()
 
-        trend_df[selected_date] = (
-            pd.to_datetime(
-                trend_df[selected_date],
-                errors="coerce",
-            )
+        contribution_df[selected_category_2] = (
+            contribution_df[selected_category_2]
+            .fillna("Missing")
+            .astype(str)
         )
 
-        trend_df[selected_metric] = (
-            pd.to_numeric(
-                trend_df[selected_metric],
-                errors="coerce",
-            )
+        contribution_df[selected_metric] = pd.to_numeric(
+            contribution_df[selected_metric],
+            errors="coerce",
         )
 
-        trend_df = trend_df.dropna()
+        contribution_df = contribution_df.dropna(
+            subset=[selected_metric]
+        )
 
-        if not trend_df.empty:
+        contribution_df = (
+            contribution_df
+            .groupby(selected_category_2, as_index=False)[selected_metric]
+            .sum()
+            .sort_values(selected_metric, ascending=False)
+        )
 
-            trend_df = (
-                trend_df
-                .groupby(
-                    selected_date,
-                    as_index=False,
-                )[selected_metric]
-                .mean()
-                .sort_values(
-                    selected_date
-                )
-            )
+        if not contribution_df.empty:
 
-            fig = px.line(
-                trend_df,
-                x=selected_date,
-                y=selected_metric,
-                markers=True,
-                title=(
-                    f"{selected_metric} over time"
-                ),
+            if len(contribution_df) > 8:
+
+                top_values = contribution_df.head(7).copy()
+
+                other_value = contribution_df.iloc[7:][
+                    selected_metric
+                ].sum()
+
+                if other_value != 0:
+
+                    other_row = pd.DataFrame(
+                        {
+                            selected_category_2: ["Other"],
+                            selected_metric: [other_value],
+                        }
+                    )
+
+                    top_values = pd.concat(
+                        [top_values, other_row],
+                        ignore_index=True,
+                    )
+
+                contribution_df = top_values
+
+            fig = px.pie(
+                contribution_df,
+                names=selected_category_2,
+                values=selected_metric,
+                hole=0.42,
+                title=f"{selected_metric} Contribution by {selected_category_2}",
             )
 
             fig.update_layout(
-                height=430,
-                margin=dict(
-                    l=20,
-                    r=20,
-                    t=60,
-                    b=20,
-                ),
-                hovermode="x unified",
+                height=400,
+                margin=dict(l=20, r=20, t=60, b=20),
+                legend_title_text="",
+            )
+
+            fig.update_traces(
+                textposition="inside",
+                textinfo="percent+label",
             )
 
             st.plotly_chart(
@@ -460,539 +461,467 @@ if datetime_columns and numeric_columns:
         else:
 
             st.info(
-                "No valid time-series data "
-                "was found."
+                "No valid numeric data is available for this contribution chart."
             )
 
-else:
+    else:
 
-    st.info(
-        "A date/time column and at least one "
-        "numeric column are required for "
-        "trend analysis."
+        st.info(
+            "A categorical and numeric column are required for contribution analysis."
+        )
+
+
+# ============================================================
+# TREND ANALYSIS
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">📈 Trend Analysis</div>',
+    unsafe_allow_html=True,
+)
+
+if datetime_columns and numeric_columns:
+
+    trend_date = st.selectbox(
+        "Date / Time Field",
+        datetime_columns,
+        key="dashboard_trend_date",
     )
 
+    trend_metric = st.selectbox(
+        "Metric",
+        numeric_columns,
+        key="dashboard_trend_metric",
+    )
 
-# =========================================================
-# CATEGORY ANALYSIS
-# =========================================================
+    trend_df = df[[trend_date, trend_metric]].copy()
 
-st.divider()
+    trend_df[trend_date] = pd.to_datetime(
+        trend_df[trend_date],
+        errors="coerce",
+    )
 
-st.subheader(
-    "🏆 Category Performance"
-)
+    trend_df[trend_metric] = pd.to_numeric(
+        trend_df[trend_metric],
+        errors="coerce",
+    )
 
-categorical_columns = list(
-    classification[
-        "categorical"
-    ]
-)
+    trend_df = trend_df.dropna()
 
-if categorical_columns and numeric_columns:
+    if not trend_df.empty:
 
-    cat_col1, cat_col2 = st.columns(2)
-
-    with cat_col1:
-
-        selected_category_1 = st.selectbox(
-            "Category",
-            categorical_columns,
-            key="dashboard_category_1",
-        )
-
-        selected_metric_1 = st.selectbox(
-            "Metric",
-            numeric_columns,
-            key="dashboard_category_metric_1",
-        )
-
-        category_df_1 = df[
-            [
-                selected_category_1,
-                selected_metric_1,
-            ]
-        ].copy()
-
-        category_df_1[
-            selected_metric_1
-        ] = pd.to_numeric(
-            category_df_1[
-                selected_metric_1
-            ],
-            errors="coerce",
-        )
-
-        category_df_1 = (
-            category_df_1
-            .dropna()
-            .groupby(
-                selected_category_1,
-                as_index=False,
-            )[selected_metric_1]
+        trend_df = (
+            trend_df
+            .groupby(trend_date, as_index=False)[trend_metric]
             .sum()
-            .sort_values(
-                selected_metric_1,
-                ascending=False,
-            )
-            .head(15)
+            .sort_values(trend_date)
         )
 
-        fig1 = px.bar(
-            category_df_1,
-            x=selected_category_1,
-            y=selected_metric_1,
-            text_auto=".2s",
-            title=(
-                f"{selected_metric_1} by "
-                f"{selected_category_1}"
-            ),
+        fig = px.line(
+            trend_df,
+            x=trend_date,
+            y=trend_metric,
+            markers=True,
+            title=f"{trend_metric} Over Time",
         )
 
-        fig1.update_layout(
+        fig.update_layout(
             height=430,
-            margin=dict(
-                l=20,
-                r=20,
-                t=60,
-                b=20,
-            ),
+            margin=dict(l=20, r=20, t=60, b=20),
         )
 
         st.plotly_chart(
-            fig1,
+            fig,
             use_container_width=True,
-        )
-
-    with cat_col2:
-
-        selected_category_2 = st.selectbox(
-            "Second Category",
-            categorical_columns,
-            index=(
-                1
-                if len(categorical_columns) > 1
-                else 0
-            ),
-            key="dashboard_category_2",
-        )
-
-        selected_metric_2 = st.selectbox(
-            "Metric",
-            numeric_columns,
-            index=(
-                1
-                if len(numeric_columns) > 1
-                else 0
-            ),
-            key="dashboard_category_metric_2",
-        )
-
-        category_df_2 = df[
-            [
-                selected_category_2,
-                selected_metric_2,
-            ]
-        ].copy()
-
-        category_df_2[
-            selected_metric_2
-        ] = pd.to_numeric(
-            category_df_2[
-                selected_metric_2
-            ],
-            errors="coerce",
-        )
-
-        category_df_2 = (
-            category_df_2
-            .dropna()
-            .groupby(
-                selected_category_2,
-                as_index=False,
-            )[selected_metric_2]
-            .sum()
-            .sort_values(
-                selected_metric_2,
-                ascending=False,
-            )
-            .head(15)
-        )
-
-        fig2 = px.bar(
-            category_df_2,
-            x=selected_category_2,
-            y=selected_metric_2,
-            text_auto=".2s",
-            title=(
-                f"{selected_metric_2} by "
-                f"{selected_category_2}"
-            ),
-        )
-
-        fig2.update_layout(
-            height=430,
-            margin=dict(
-                l=20,
-                r=20,
-                t=60,
-                b=20,
-            ),
-        )
-
-        st.plotly_chart(
-            fig2,
-            use_container_width=True,
-        )
-
-else:
-
-    st.info(
-        "Categorical and numeric columns are "
-        "required for category analysis."
-    )
-
-
-# =========================================================
-# NUMERIC DISTRIBUTION
-# =========================================================
-
-st.divider()
-
-st.subheader(
-    "📊 Numeric Distribution"
-)
-
-if numeric_columns:
-
-    distribution_col1, distribution_col2 = (
-        st.columns([1, 3])
-    )
-
-    with distribution_col1:
-
-        distribution_metric = st.selectbox(
-            "Select numeric field",
-            numeric_columns,
-            key="dashboard_distribution",
-        )
-
-    with distribution_col2:
-
-        distribution_data = pd.to_numeric(
-            df[distribution_metric],
-            errors="coerce",
-        ).dropna()
-
-        fig3 = px.histogram(
-            distribution_data,
-            x=distribution_metric,
-            nbins=25,
-            marginal="box",
-            title=(
-                f"Distribution of "
-                f"{distribution_metric}"
-            ),
-        )
-
-        fig3.update_layout(
-            height=430,
-            margin=dict(
-                l=20,
-                r=20,
-                t=60,
-                b=20,
-        ),
-        )
-
-        st.plotly_chart(
-            fig3,
-            use_container_width=True,
-        )
-
-else:
-
-    st.info(
-        "No numeric columns available."
-    )
-
-
-# =========================================================
-# CORRELATION ANALYSIS
-# =========================================================
-
-st.divider()
-
-st.subheader(
-    "🔗 Relationships Between Variables"
-)
-
-if len(numeric_columns) >= 2:
-
-    correlation_matrix = (
-        df[numeric_columns]
-        .corr()
-    )
-
-    fig4 = px.imshow(
-        correlation_matrix,
-        text_auto=".2f",
-        aspect="auto",
-        title="Correlation Matrix",
-    )
-
-    fig4.update_layout(
-        height=600,
-        margin=dict(
-            l=20,
-            r=20,
-            t=60,
-            b=20,
-        ),
-    )
-
-    st.plotly_chart(
-        fig4,
-        use_container_width=True,
-    )
-
-else:
-
-    st.info(
-        "At least two numeric columns are "
-        "required for correlation analysis."
-    )
-
-
-# =========================================================
-# ANOMALY SUMMARY
-# =========================================================
-
-st.divider()
-
-st.subheader(
-    "🚨 Anomaly Summary"
-)
-
-if outliers.empty:
-
-    st.info(
-        "No numeric fields are available "
-        "for outlier analysis."
-    )
-
-else:
-
-    significant_outliers = (
-        outliers[
-            outliers["outliers"] > 0
-        ]
-        .copy()
-    )
-
-    if significant_outliers.empty:
-
-        st.success(
-            "✅ No statistical outliers were detected."
         )
 
     else:
 
-        anomaly_col1, anomaly_col2 = (
-            st.columns([1, 2])
-        )
+        st.info("The selected date and metric do not contain enough valid data.")
 
-        with anomaly_col1:
-
-            total_outliers = int(
-                significant_outliers[
-                    "outliers"
-                ].sum()
-            )
-
-            st.metric(
-                "Potential Outliers",
-                f"{total_outliers:,}",
-            )
-
-            st.dataframe(
-                significant_outliers,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        with anomaly_col2:
-
-            fig5 = px.bar(
-                significant_outliers,
-                x="column",
-                y="outliers",
-                text="outliers",
-                title="Potential Outliers by Field",
-            )
-
-            fig5.update_layout(
-                height=400,
-                margin=dict(
-                    l=20,
-                    r=20,
-                    t=60,
-                    b=20,
-                ),
-            )
-
-            st.plotly_chart(
-                fig5,
-                use_container_width=True,
-            )
-
-
-# =========================================================
-# STRONGEST RELATIONSHIPS
-# =========================================================
-
-st.divider()
-
-st.subheader(
-    "🔗 Strongest Relationships"
-)
-
-if correlations.empty:
+else:
 
     st.info(
-        "No correlation pairs are available."
+        "A recognizable date/time column and numeric column are required for trend analysis."
+    )
+
+
+# ============================================================
+# CATEGORY PERFORMANCE
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">📊 Category Performance</div>',
+    unsafe_allow_html=True,
+)
+
+if categorical_columns and numeric_columns:
+
+    category_col, metric_col = st.columns(2)
+
+    with category_col:
+
+        performance_category = st.selectbox(
+            "Category",
+            categorical_columns,
+            key="dashboard_performance_category",
+        )
+
+    with metric_col:
+
+        performance_metric = st.selectbox(
+            "Metric",
+            numeric_columns,
+            key="dashboard_performance_metric",
+        )
+
+    performance_df = df[
+        [performance_category, performance_metric]
+    ].copy()
+
+    performance_df[performance_category] = (
+        performance_df[performance_category]
+        .fillna("Missing")
+        .astype(str)
+    )
+
+    performance_df[performance_metric] = pd.to_numeric(
+        performance_df[performance_metric],
+        errors="coerce",
+    )
+
+    performance_df = performance_df.dropna(
+        subset=[performance_metric]
+    )
+
+    performance_df = (
+        performance_df
+        .groupby(performance_category, as_index=False)[performance_metric]
+        .sum()
+        .sort_values(performance_metric, ascending=False)
+    )
+
+    if not performance_df.empty:
+
+        fig = px.bar(
+            performance_df,
+            x=performance_category,
+            y=performance_metric,
+            text_auto=".2s",
+            title=f"{performance_metric} by {performance_category}",
+        )
+
+        fig.update_layout(
+            height=430,
+            margin=dict(l=20, r=20, t=60, b=20),
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+        )
+
+else:
+
+    st.info(
+        "Categorical and numeric fields are required for category performance."
+    )
+
+
+# ============================================================
+# NUMERIC DISTRIBUTION
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">📦 Numeric Distribution</div>',
+    unsafe_allow_html=True,
+)
+
+if numeric_columns:
+
+    distribution_metric = st.selectbox(
+        "Select numeric field",
+        numeric_columns,
+        key="dashboard_distribution_metric",
+    )
+
+    distribution_values = pd.to_numeric(
+        df[distribution_metric],
+        errors="coerce",
+    ).dropna()
+
+    if not distribution_values.empty:
+
+        distribution_df = pd.DataFrame(
+            {
+                distribution_metric: distribution_values
+            }
+        )
+
+        fig = px.histogram(
+            distribution_df,
+            x=distribution_metric,
+            marginal="box",
+            nbins=30,
+            title=f"Distribution of {distribution_metric}",
+        )
+
+        fig.update_layout(
+            height=430,
+            margin=dict(l=20, r=20, t=60, b=20),
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+        )
+
+    else:
+
+        st.info("No valid numeric values available.")
+
+else:
+
+    st.info("No numeric columns detected.")
+
+
+# ============================================================
+# CORRELATION HEATMAP
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">🔥 Correlation Analysis</div>',
+    unsafe_allow_html=True,
+)
+
+if len(numeric_columns) >= 2:
+
+    correlation_df = df[numeric_columns].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+
+    corr_matrix = correlation_df.corr()
+
+    fig = px.imshow(
+        corr_matrix,
+        text_auto=".2f",
+        aspect="auto",
+        title="Numeric Correlation Matrix",
+    )
+
+    fig.update_layout(
+        height=500,
+        margin=dict(l=20, r=20, t=60, b=20),
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
     )
 
 else:
 
-    top_correlations = correlations.head(
-        10
-    ).copy()
-
-    st.dataframe(
-        top_correlations,
-        use_container_width=True,
-        hide_index=True,
+    st.info(
+        "At least two numeric columns are required for correlation analysis."
     )
 
 
-# =========================================================
-# AUTOMATIC INSIGHTS
-# =========================================================
+# ============================================================
+# ANOMALY SUMMARY
+# ============================================================
 
-st.divider()
-
-st.subheader(
-    "🧠 Automatic Insights"
+st.markdown(
+    '<div class="section-title">🚨 Anomaly Summary</div>',
+    unsafe_allow_html=True,
 )
+
+try:
+
+    outliers = analysis.get("outliers", {})
+
+    if isinstance(outliers, dict) and outliers:
+
+        anomaly_rows = []
+
+        for column, values in outliers.items():
+
+            if isinstance(values, pd.DataFrame):
+
+                count = len(values)
+
+            elif isinstance(values, (list, tuple, np.ndarray, pd.Series)):
+
+                count = len(values)
+
+            elif isinstance(values, int):
+
+                count = values
+
+            else:
+
+                count = 0
+
+            anomaly_rows.append(
+                {
+                    "Column": column,
+                    "Anomalies": count,
+                }
+            )
+
+        anomaly_df = pd.DataFrame(anomaly_rows)
+
+        if not anomaly_df.empty:
+
+            anomaly_df = anomaly_df.sort_values(
+                "Anomalies",
+                ascending=False,
+            )
+
+            fig = px.bar(
+                anomaly_df,
+                x="Column",
+                y="Anomalies",
+                text_auto=True,
+                title="Potential Outliers by Column",
+            )
+
+            fig.update_layout(
+                height=400,
+                margin=dict(l=20, r=20, t=60, b=20),
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+            )
+
+        else:
+
+            st.success("No significant anomalies detected.")
+
+    else:
+
+        st.success("No significant anomalies detected.")
+
+except Exception:
+
+    st.info(
+        "Anomaly information is not available for this dataset."
+    )
+
+
+# ============================================================
+# AUTOMATIC INSIGHTS
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">💡 Automatic Insights</div>',
+    unsafe_allow_html=True,
+)
+
+findings = analysis.get("findings", [])
 
 if findings:
 
-    for finding in findings:
+    for finding in findings[:8]:
 
         st.markdown(
             f"""
-<div class="insight-card">
-
-🔎 {finding}
-
-</div>
-""",
+            <div class="insight-card">
+                💡 {finding}
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
 else:
 
-    st.info(
-        "No automatic insights were generated."
-    )
+    # Generate a few generic insights when the analytics engine
+    # does not return findings.
+
+    if duplicate_rows > 0:
+
+        st.markdown(
+            f"""
+            <div class="insight-card">
+                ⚠️ The dataset contains {duplicate_rows:,} duplicate rows.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if missing_cells > 0:
+
+        st.markdown(
+            f"""
+            <div class="insight-card">
+                ⚠️ The dataset contains {missing_cells:,} missing cells.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if not duplicate_rows and not missing_cells:
+
+        st.markdown(
+            """
+            <div class="insight-card">
+                ✅ No duplicate rows or missing cells were detected.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-# =========================================================
+# ============================================================
 # DATA STRUCTURE
-# =========================================================
+# ============================================================
 
-st.divider()
-
-st.subheader(
-    "🧩 Data Structure"
+st.markdown(
+    '<div class="section-title">🧬 Data Structure</div>',
+    unsafe_allow_html=True,
 )
 
-structure_col1, structure_col2, structure_col3 = (
-    st.columns(3)
-)
+structure_cols = st.columns(3)
 
+with structure_cols[0]:
 
-with structure_col1:
-
-    st.markdown(
-        "### 🔢 Numeric Fields"
+    st.metric(
+        "Numeric Fields",
+        len(numeric_columns),
     )
 
     if numeric_columns:
+        st.caption(", ".join(numeric_columns[:10]))
 
-        for column in numeric_columns:
+with structure_cols[1]:
 
-            st.write(
-                f"• {column}"
-            )
-
-    else:
-
-        st.caption(
-            "None detected."
-        )
-
-
-with structure_col2:
-
-    st.markdown(
-        "### 🔤 Categorical Fields"
+    st.metric(
+        "Categorical Fields",
+        len(categorical_columns),
     )
 
     if categorical_columns:
+        st.caption(", ".join(categorical_columns[:10]))
 
-        for column in categorical_columns:
+with structure_cols[2]:
 
-            st.write(
-                f"• {column}"
-            )
-
-    else:
-
-        st.caption(
-            "None detected."
-        )
-
-
-with structure_col3:
-
-    st.markdown(
-        "### 📅 Date Fields"
+    st.metric(
+        "Date / Time Fields",
+        len(datetime_columns),
     )
 
     if datetime_columns:
-
-        for column in datetime_columns:
-
-            st.write(
-                f"• {column}"
-            )
-
-    else:
-
-        st.caption(
-            "None detected."
-        )
+        st.caption(", ".join(datetime_columns[:10]))
 
 
-# =========================================================
+# ============================================================
 # FOOTER
-# =========================================================
+# ============================================================
 
 st.divider()
 
 st.caption(
-    f"InsightAI • Executive Dashboard • "
-    f"{dataset_name}"
+    "InsightAI • AI-Powered Data Analytics & Decision Intelligence Platform"
 )
