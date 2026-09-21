@@ -16,7 +16,7 @@ class GroqProvider(AIProvider):
         self.api_key = self._get_secret("GROQ_API_KEY")
         self.model = self._get_secret(
             "GROQ_MODEL",
-            "llama-3.3-70b-versatile"
+            "openai/gpt-oss-120b"
         )
 
     def _get_secret(self, key, default=None):
