@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 
@@ -27,7 +26,6 @@ SUPPORTED_EXTENSIONS = {
     ".tsv": "TSV",
     ".ods": "OpenDocument Spreadsheet",
 
-    # Wireshark
     ".pcap": "Wireshark PCAP",
     ".pcapng": "Wireshark PCAPNG",
     ".cap": "Wireshark Capture",
@@ -39,10 +37,6 @@ SUPPORTED_EXTENSIONS = {
 # ============================================================
 
 def detect_file_type(filename: str) -> str:
-    """
-    Detect file type from filename extension.
-    """
-
     extension = Path(filename).suffix.lower()
 
     if extension not in SUPPORTED_EXTENSIONS:
@@ -55,23 +49,16 @@ def detect_file_type(filename: str) -> str:
 
 
 # ============================================================
-# TSHARK DETECTION
+# FIND TSHARK
 # ============================================================
 
 def find_tshark() -> str | None:
-    """
-    Find tshark executable on the system.
-
-    Returns:
-        Path to tshark or None.
-    """
 
     tshark = shutil.which("tshark")
 
     if tshark:
         return tshark
 
-    # Common Windows location
     windows_paths = [
         r"C:\Program Files\Wireshark\tshark.exe",
         r"C:\Program Files (x86)\Wireshark\tshark.exe",
@@ -86,13 +73,66 @@ def find_tshark() -> str | None:
 
 
 # ============================================================
+# GET AVAILABLE TSHARK FIELDS
+# ============================================================
+
+def get_available_tshark_fields(
+    tshark: str,
+) -> set[str]:
+    """
+    Get the list of fields supported by the installed
+    TShark/Wireshark version.
+
+    This prevents PCAP processing from failing because
+    an optional field does not exist in a particular
+    Wireshark version.
+    """
+
+    try:
+
+        process = subprocess.run(
+            [
+                tshark,
+                "-G",
+                "fields",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if process.returncode != 0:
+            return set()
+
+        fields = set()
+
+        for line in process.stdout.splitlines():
+
+            parts = line.split("\t")
+
+            # Typical format contains the field name
+            # in one of the later columns.
+            if len(parts) >= 3:
+
+                field_name = parts[2].strip()
+
+                if field_name:
+                    fields.add(field_name)
+
+        return fields
+
+    except Exception:
+
+        return set()
+
+
+# ============================================================
 # CSV
 # ============================================================
 
-def _read_csv_auto(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Automatically detect CSV encoding and delimiter.
-    """
+def _read_csv_auto(
+    file_bytes: bytes,
+) -> pd.DataFrame:
 
     encodings = [
         "utf-8",
@@ -107,7 +147,9 @@ def _read_csv_auto(file_bytes: bytes) -> pd.DataFrame:
 
         try:
 
-            text = file_bytes.decode(encoding)
+            text = file_bytes.decode(
+                encoding
+            )
 
             return pd.read_csv(
                 io.StringIO(text),
@@ -120,7 +162,8 @@ def _read_csv_auto(file_bytes: bytes) -> pd.DataFrame:
             last_error = exc
 
     raise ValueError(
-        f"Unable to read CSV file. {last_error}"
+        f"Unable to read CSV file. "
+        f"{last_error}"
     )
 
 
@@ -128,22 +171,22 @@ def _read_csv_auto(file_bytes: bytes) -> pd.DataFrame:
 # TEXT
 # ============================================================
 
-def _read_text_auto(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Read TXT file using delimiter detection.
-    """
+def _read_text_auto(
+    file_bytes: bytes,
+) -> pd.DataFrame:
 
-    return _read_csv_auto(file_bytes)
+    return _read_csv_auto(
+        file_bytes
+    )
 
 
 # ============================================================
 # JSON
 # ============================================================
 
-def _read_json_auto(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Read common JSON dataset structures.
-    """
+def _read_json_auto(
+    file_bytes: bytes,
+) -> pd.DataFrame:
 
     encodings = [
         "utf-8",
@@ -157,13 +200,17 @@ def _read_json_auto(file_bytes: bytes) -> pd.DataFrame:
 
         try:
 
-            text = file_bytes.decode(encoding)
+            text = file_bytes.decode(
+                encoding
+            )
 
             data = json.loads(text)
 
             if isinstance(data, list):
 
-                return pd.json_normalize(data)
+                return pd.json_normalize(
+                    data
+                )
 
             if isinstance(data, dict):
 
@@ -176,18 +223,23 @@ def _read_json_auto(file_bytes: bytes) -> pd.DataFrame:
 
                     if (
                         key in data
-                        and isinstance(data[key], list)
+                        and isinstance(
+                            data[key],
+                            list,
+                        )
                     ):
 
                         return pd.json_normalize(
                             data[key]
                         )
 
-                return pd.json_normalize(data)
+                return pd.json_normalize(
+                    data
+                )
 
             raise ValueError(
-                "JSON structure could not be converted "
-                "into a table."
+                "JSON structure could not "
+                "be converted into a table."
             )
 
         except Exception as exc:
@@ -195,12 +247,138 @@ def _read_json_auto(file_bytes: bytes) -> pd.DataFrame:
             last_error = exc
 
     raise ValueError(
-        f"Unable to read JSON file. {last_error}"
+        f"Unable to read JSON file. "
+        f"{last_error}"
     )
 
 
 # ============================================================
-# WIRESHARK / TSHARK
+# WIRESHARK FIELD DEFINITIONS
+# ============================================================
+
+PCAP_FIELDS = {
+
+    # Frame
+    "frame.number":
+        "Packet Number",
+
+    "frame.time_epoch":
+        "Timestamp",
+
+    "frame.len":
+        "Packet Length",
+
+    "frame.protocols":
+        "Protocols",
+
+    # Ethernet
+    "eth.src":
+        "Ethernet Source",
+
+    "eth.dst":
+        "Ethernet Destination",
+
+    # IPv4
+    "ip.src":
+        "IPv4 Source",
+
+    "ip.dst":
+        "IPv4 Destination",
+
+    "ip.proto":
+        "IP Protocol",
+
+    # IPv6
+    "ipv6.src":
+        "IPv6 Source",
+
+    "ipv6.dst":
+        "IPv6 Destination",
+
+    "ipv6.nxt":
+        "IPv6 Next Header",
+
+    # TCP
+    "tcp.srcport":
+        "TCP Source Port",
+
+    "tcp.dstport":
+        "TCP Destination Port",
+
+    "tcp.flags":
+        "TCP Flags",
+
+    "tcp.stream":
+        "TCP Stream",
+
+    "tcp.analysis.retransmission":
+        "TCP Retransmission",
+
+    "tcp.analysis.out_of_order":
+        "TCP Out Of Order",
+
+    "tcp.analysis.duplicate_ack":
+        "TCP Duplicate ACK",
+
+    # UDP
+    "udp.srcport":
+        "UDP Source Port",
+
+    "udp.dstport":
+        "UDP Destination Port",
+
+    "udp.stream":
+        "UDP Stream",
+
+    # ICMP
+    "icmp.type":
+        "ICMP Type",
+
+    "icmp.code":
+        "ICMP Code",
+
+    # DNS
+    "dns.qry.name":
+        "DNS Query",
+
+    # HTTP
+    "http.host":
+        "HTTP Host",
+
+    "http.request.method":
+        "HTTP Method",
+
+    "http.response.code":
+        "HTTP Response Code",
+
+    # TLS
+    "tls.handshake.type":
+        "TLS Handshake Type",
+
+    "tls.record.version":
+        "TLS Version",
+
+    # VLAN
+    "vlan.id":
+        "VLAN ID",
+
+    # MPLS
+    "mpls.label":
+        "MPLS Label",
+
+    # PPPoE
+    #
+    # IMPORTANT:
+    # Do not directly depend on PPPoE fields.
+    # They are version/dissector dependent.
+    #
+    # We intentionally do not include
+    # pppoes.session_id here.
+}
+
+
+# ============================================================
+# LOAD PCAP WITH TSHARK
 # ============================================================
 
 def load_pcap_with_tshark(
@@ -208,39 +386,127 @@ def load_pcap_with_tshark(
     filename: str,
     max_packets: int = 250_000,
 ) -> tuple[pd.DataFrame, dict]:
-    """
-    Extract packet information from PCAP/PCAPNG/CAP
-    using tshark.
-
-    max_packets protects the application from attempting
-    to load extremely large captures into memory.
-    """
 
     tshark = find_tshark()
 
     if not tshark:
 
         raise RuntimeError(
-            "TShark was not found on this system.\n\n"
+            "TShark was not found on this system. "
             "Install Wireshark with the TShark component "
-            "and make sure tshark.exe is available."
+            "and make sure tshark is available."
         )
 
-    extension = Path(filename).suffix.lower()
+    extension = Path(
+        filename
+    ).suffix.lower()
+
+
+    # --------------------------------------------------------
+    # SAVE TEMPORARY CAPTURE
+    # --------------------------------------------------------
 
     with tempfile.NamedTemporaryFile(
         suffix=extension,
         delete=False,
     ) as temp_file:
 
-        temp_path = Path(temp_file.name)
+        temp_path = Path(
+            temp_file.name
+        )
 
-        temp_file.write(file_bytes)
+        temp_file.write(
+            file_bytes
+        )
+
 
     try:
 
         # ----------------------------------------------------
-        # Basic capture information
+        # TSHARK VERSION
+        # ----------------------------------------------------
+
+        version_process = subprocess.run(
+            [
+                tshark,
+                "--version",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        tshark_version = (
+            version_process.stdout
+            or version_process.stderr
+        ).splitlines()[0] \
+            if (
+                version_process.stdout
+                or version_process.stderr
+            ) \
+            else "Unknown"
+
+
+        # ----------------------------------------------------
+        # AVAILABLE FIELDS
+        # ----------------------------------------------------
+
+        available_fields = (
+            get_available_tshark_fields(
+                tshark
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # SELECT ONLY VALID FIELDS
+        # ----------------------------------------------------
+
+        if available_fields:
+
+            selected_fields = [
+                field
+                for field in PCAP_FIELDS
+                if field in available_fields
+            ]
+
+        else:
+
+            # If field discovery fails, use a conservative
+            # universally supported set.
+
+            selected_fields = [
+                "frame.number",
+                "frame.time_epoch",
+                "frame.len",
+                "frame.protocols",
+                "eth.src",
+                "eth.dst",
+                "ip.src",
+                "ip.dst",
+                "ip.proto",
+                "ipv6.src",
+                "ipv6.dst",
+                "tcp.srcport",
+                "tcp.dstport",
+                "tcp.flags",
+                "tcp.stream",
+                "udp.srcport",
+                "udp.dstport",
+                "udp.stream",
+            ]
+
+
+        if not selected_fields:
+
+            raise RuntimeError(
+                "TShark is installed, but no usable "
+                "packet fields were detected."
+            )
+
+
+        # ----------------------------------------------------
+        # CAPTURE INFORMATION
         # ----------------------------------------------------
 
         info_command = [
@@ -259,77 +525,43 @@ def load_pcap_with_tshark(
             timeout=120,
         )
 
+        capture_info = (
+            info_process.stdout
+            or info_process.stderr
+            or ""
+        )
+
+
         # ----------------------------------------------------
-        # Packet extraction
+        # EXTRACT PACKETS
         # ----------------------------------------------------
-
-        fields = [
-            "frame.number",
-            "frame.time_epoch",
-            "frame.len",
-            "frame.protocols",
-
-            "eth.src",
-            "eth.dst",
-
-            "ip.src",
-            "ip.dst",
-            "ip.proto",
-
-            "ipv6.src",
-            "ipv6.dst",
-            "ipv6.nxt",
-
-            "tcp.srcport",
-            "tcp.dstport",
-            "tcp.flags",
-            "tcp.stream",
-            "tcp.analysis.retransmission",
-            "tcp.analysis.out_of_order",
-            "tcp.analysis.duplicate_ack",
-
-            "udp.srcport",
-            "udp.dstport",
-            "udp.stream",
-
-            "icmp.type",
-            "icmp.code",
-
-            "dns.qry.name",
-
-            "http.host",
-            "http.request.method",
-            "http.response.code",
-
-            "tls.handshake.type",
-            "tls.record.version",
-
-            "vlan.id",
-
-            "mpls.label",
-
-            "pppoes.session_id",
-        ]
 
         command = [
             tshark,
             "-r",
             str(temp_path),
+
             "-T",
             "fields",
+
             "-E",
             "header=y",
+
             "-E",
             "separator=\t",
+
             "-E",
             "quote=d",
+
             "-E",
             "occurrence=f",
+
             "-c",
             str(max_packets),
         ]
 
-        for field in fields:
+
+        for field in selected_fields:
 
             command.extend(
                 [
@@ -338,6 +570,7 @@ def load_pcap_with_tshark(
                 ]
             )
 
+
         process = subprocess.run(
             command,
             capture_output=True,
@@ -345,92 +578,66 @@ def load_pcap_with_tshark(
             timeout=600,
         )
 
+
+        # ----------------------------------------------------
+        # ERROR
+        # ----------------------------------------------------
+
         if process.returncode != 0:
 
-            error = process.stderr.strip()
+            error = (
+                process.stderr.strip()
+                or process.stdout.strip()
+                or "Unknown TShark error."
+            )
 
             raise RuntimeError(
                 "TShark failed to process the capture.\n\n"
                 f"{error}"
             )
 
+
         if not process.stdout.strip():
 
             raise ValueError(
-                "No packets were extracted from the capture."
+                "No packets were extracted from "
+                "the capture."
             )
 
+
+        # ----------------------------------------------------
+        # READ INTO PANDAS
+        # ----------------------------------------------------
+
         df = pd.read_csv(
-            io.StringIO(process.stdout),
+            io.StringIO(
+                process.stdout
+            ),
             sep="\t",
             dtype=str,
             keep_default_na=False,
         )
 
+
         # ----------------------------------------------------
-        # Rename columns
+        # RENAME COLUMNS
         # ----------------------------------------------------
 
         rename_map = {
-            "frame.number": "Packet Number",
-            "frame.time_epoch": "Timestamp",
-            "frame.len": "Packet Length",
-            "frame.protocols": "Protocols",
-
-            "eth.src": "Ethernet Source",
-            "eth.dst": "Ethernet Destination",
-
-            "ip.src": "IPv4 Source",
-            "ip.dst": "IPv4 Destination",
-            "ip.proto": "IP Protocol",
-
-            "ipv6.src": "IPv6 Source",
-            "ipv6.dst": "IPv6 Destination",
-            "ipv6.nxt": "IPv6 Next Header",
-
-            "tcp.srcport": "TCP Source Port",
-            "tcp.dstport": "TCP Destination Port",
-            "tcp.flags": "TCP Flags",
-            "tcp.stream": "TCP Stream",
-            "tcp.analysis.retransmission":
-                "TCP Retransmission",
-            "tcp.analysis.out_of_order":
-                "TCP Out Of Order",
-            "tcp.analysis.duplicate_ack":
-                "TCP Duplicate ACK",
-
-            "udp.srcport": "UDP Source Port",
-            "udp.dstport": "UDP Destination Port",
-            "udp.stream": "UDP Stream",
-
-            "icmp.type": "ICMP Type",
-            "icmp.code": "ICMP Code",
-
-            "dns.qry.name": "DNS Query",
-
-            "http.host": "HTTP Host",
-            "http.request.method": "HTTP Method",
-            "http.response.code": "HTTP Response Code",
-
-            "tls.handshake.type":
-                "TLS Handshake Type",
-            "tls.record.version":
-                "TLS Version",
-
-            "vlan.id": "VLAN ID",
-            "mpls.label": "MPLS Label",
-
-            "pppoes.session_id":
-                "PPPoE Session ID",
+            field: PCAP_FIELDS[field]
+            for field in selected_fields
+            if field in PCAP_FIELDS
         }
+
 
         df.rename(
             columns=rename_map,
             inplace=True,
         )
 
+
         # ----------------------------------------------------
-        # Numeric conversion
+        # NUMERIC FIELDS
         # ----------------------------------------------------
 
         numeric_columns = [
@@ -438,19 +645,25 @@ def load_pcap_with_tshark(
             "Timestamp",
             "Packet Length",
             "IP Protocol",
+
             "TCP Source Port",
             "TCP Destination Port",
             "TCP Stream",
+
             "UDP Source Port",
             "UDP Destination Port",
             "UDP Stream",
+
             "ICMP Type",
             "ICMP Code",
+
             "HTTP Response Code",
+
             "VLAN ID",
+
             "MPLS Label",
-            "PPPoE Session ID",
         ]
+
 
         for column in numeric_columns:
 
@@ -461,8 +674,9 @@ def load_pcap_with_tshark(
                     errors="coerce",
                 )
 
+
         # ----------------------------------------------------
-        # Timestamp
+        # TIMESTAMP
         # ----------------------------------------------------
 
         if "Timestamp" in df.columns:
@@ -473,13 +687,15 @@ def load_pcap_with_tshark(
                 errors="coerce",
             )
 
+
         # ----------------------------------------------------
-        # Packet statistics
+        # PACKET STATISTICS
         # ----------------------------------------------------
 
         packet_count = len(df)
 
         total_bytes = 0
+
 
         if "Packet Length" in df.columns:
 
@@ -489,11 +705,16 @@ def load_pcap_with_tshark(
                 .sum()
             )
 
+
         duration_seconds = 0.0
+
 
         if "Timestamp" in df.columns:
 
-            timestamps = df["Timestamp"].dropna()
+            timestamps = (
+                df["Timestamp"]
+                .dropna()
+            )
 
             if len(timestamps) >= 2:
 
@@ -502,8 +723,11 @@ def load_pcap_with_tshark(
                     - timestamps.min()
                 ).total_seconds()
 
+
         packets_per_second = 0.0
+
         bytes_per_second = 0.0
+
 
         if duration_seconds > 0:
 
@@ -517,42 +741,110 @@ def load_pcap_with_tshark(
                 / duration_seconds
             )
 
+
+        # ----------------------------------------------------
+        # METADATA
+        # ----------------------------------------------------
+
+        if extension == ".pcap":
+
+            file_type = "Wireshark PCAP"
+
+        elif extension == ".pcapng":
+
+            file_type = "Wireshark PCAPNG"
+
+        else:
+
+            file_type = "Wireshark Capture"
+
+
         metadata = {
-            "file_type": (
-                "Wireshark PCAP"
-                if extension == ".pcap"
-                else (
-                    "Wireshark PCAPNG"
-                    if extension == ".pcapng"
-                    else "Wireshark Capture"
-                )
-            ),
-            "packets_loaded": packet_count,
-            "max_packets": max_packets,
-            "total_bytes": total_bytes,
-            "duration_seconds": round(
-                duration_seconds,
-                3,
-            ),
-            "packets_per_second": round(
-                packets_per_second,
-                3,
-            ),
-            "bytes_per_second": round(
-                bytes_per_second,
-                3,
-            ),
-            "tshark": tshark,
-            "capture_info": info_process.stdout,
+
+            "file_type":
+                file_type,
+
+            "packets_loaded":
+                packet_count,
+
+            "max_packets":
+                max_packets,
+
+            "total_bytes":
+                total_bytes,
+
+            "duration_seconds":
+                round(
+                    duration_seconds,
+                    3,
+                ),
+
+            "packets_per_second":
+                round(
+                    packets_per_second,
+                    3,
+                ),
+
+            "bytes_per_second":
+                round(
+                    bytes_per_second,
+                    3,
+                ),
+
+            "tshark":
+                tshark,
+
+            "tshark_version":
+                tshark_version,
+
+            "fields_available":
+                len(
+                    available_fields
+                ),
+
+            "fields_used":
+                len(
+                    selected_fields
+                ),
+
+            "fields_skipped":
+                [
+                    field
+                    for field in PCAP_FIELDS
+                    if field not in selected_fields
+                ],
+
+            "capture_info":
+                capture_info,
         }
 
-        return df, metadata
+
+        # Store metadata inside DataFrame
+        # so other InsightAI modules can access it.
+
+        df.attrs[
+            "source_type"
+        ] = file_type
+
+        df.attrs[
+            "capture_metadata"
+        ] = metadata
+
+
+        return (
+            df,
+            metadata,
+        )
+
 
     finally:
 
         try:
+
             temp_path.unlink()
+
         except Exception:
+
             pass
 
 
@@ -570,11 +862,13 @@ def load_dataset(
             "No file was provided."
         )
 
+
     filename = uploaded_file.name
 
     extension = Path(
         filename
     ).suffix.lower()
+
 
     if extension not in SUPPORTED_EXTENSIONS:
 
@@ -583,11 +877,17 @@ def load_dataset(
         )
 
         raise ValueError(
-            f"Unsupported file type '{extension}'. "
-            f"Supported types: {supported}"
+            f"Unsupported file type "
+            f"'{extension}'. "
+            f"Supported types: "
+            f"{supported}"
         )
 
-    file_bytes = uploaded_file.getvalue()
+
+    file_bytes = (
+        uploaded_file.getvalue()
+    )
+
 
     if not file_bytes:
 
@@ -595,8 +895,9 @@ def load_dataset(
             "The uploaded file is empty."
         )
 
+
     # --------------------------------------------------------
-    # Wireshark
+    # WIRESHARK
     # --------------------------------------------------------
 
     if extension in [
@@ -605,22 +906,18 @@ def load_dataset(
         ".cap",
     ]:
 
-        df, metadata = load_pcap_with_tshark(
-            file_bytes=file_bytes,
-            filename=filename,
+        df, metadata = (
+            load_pcap_with_tshark(
+                file_bytes=file_bytes,
+                filename=filename,
+            )
         )
-
-        # Keep metadata available for the application.
-        df.attrs["source_type"] = metadata[
-            "file_type"
-        ]
-
-        df.attrs["capture_metadata"] = metadata
 
         return (
             df,
             metadata["file_type"],
         )
+
 
     # --------------------------------------------------------
     # CSV
@@ -629,9 +926,12 @@ def load_dataset(
     if extension == ".csv":
 
         return (
-            _read_csv_auto(file_bytes),
+            _read_csv_auto(
+                file_bytes
+            ),
             "CSV",
         )
+
 
     # --------------------------------------------------------
     # TSV
@@ -658,7 +958,9 @@ def load_dataset(
 
                 return (
                     pd.read_csv(
-                        io.StringIO(text),
+                        io.StringIO(
+                            text
+                        ),
                         sep="\t",
                     ),
                     "TSV",
@@ -673,28 +975,35 @@ def load_dataset(
             f"{last_error}"
         )
 
+
     # --------------------------------------------------------
-    # Excel
+    # EXCEL
     # --------------------------------------------------------
 
     if extension == ".xlsx":
 
         return (
             pd.read_excel(
-                io.BytesIO(file_bytes),
+                io.BytesIO(
+                    file_bytes
+                ),
                 engine="openpyxl",
             ),
             "Excel",
         )
 
+
     if extension == ".xls":
 
         return (
             pd.read_excel(
-                io.BytesIO(file_bytes)
+                io.BytesIO(
+                    file_bytes
+                )
             ),
             "Excel",
         )
+
 
     # --------------------------------------------------------
     # JSON
@@ -703,22 +1012,28 @@ def load_dataset(
     if extension == ".json":
 
         return (
-            _read_json_auto(file_bytes),
+            _read_json_auto(
+                file_bytes
+            ),
             "JSON",
         )
 
+
     # --------------------------------------------------------
-    # Parquet
+    # PARQUET
     # --------------------------------------------------------
 
     if extension == ".parquet":
 
         return (
             pd.read_parquet(
-                io.BytesIO(file_bytes)
+                io.BytesIO(
+                    file_bytes
+                )
             ),
             "Parquet",
         )
+
 
     # --------------------------------------------------------
     # TXT
@@ -727,9 +1042,12 @@ def load_dataset(
     if extension == ".txt":
 
         return (
-            _read_text_auto(file_bytes),
+            _read_text_auto(
+                file_bytes
+            ),
             "Text",
         )
+
 
     # --------------------------------------------------------
     # ODS
@@ -739,14 +1057,18 @@ def load_dataset(
 
         return (
             pd.read_excel(
-                io.BytesIO(file_bytes),
+                io.BytesIO(
+                    file_bytes
+                ),
                 engine="odf",
             ),
             "OpenDocument Spreadsheet",
         )
 
+
     raise ValueError(
-        f"No loader available for {extension}"
+        f"No loader available for "
+        f"{extension}"
     )
 
 
@@ -766,44 +1088,61 @@ def detect_column_types(
         "text": [],
     }
 
+
     for column in df.columns:
 
         series = df[column]
 
-        # Boolean
+
+        # ----------------------------------------------------
+        # BOOLEAN
+        # ----------------------------------------------------
+
         if pd.api.types.is_bool_dtype(
             series
         ):
 
-            result["boolean"].append(
-                column
-            )
+            result[
+                "boolean"
+            ].append(column)
 
             continue
 
-        # Numeric
+
+        # ----------------------------------------------------
+        # NUMERIC
+        # ----------------------------------------------------
+
         if pd.api.types.is_numeric_dtype(
             series
         ):
 
-            result["numeric"].append(
-                column
-            )
+            result[
+                "numeric"
+            ].append(column)
 
             continue
 
-        # Existing datetime
+
+        # ----------------------------------------------------
+        # DATETIME
+        # ----------------------------------------------------
+
         if pd.api.types.is_datetime64_any_dtype(
             series
         ):
 
-            result["datetime"].append(
-                column
-            )
+            result[
+                "datetime"
+            ].append(column)
 
             continue
 
-        # Try datetime
+
+        # ----------------------------------------------------
+        # TRY DATETIME
+        # ----------------------------------------------------
+
         try:
 
             converted = pd.to_datetime(
@@ -813,14 +1152,15 @@ def detect_column_types(
             )
 
             valid_ratio = (
-                converted.notna().mean()
+                converted.notna()
+                .mean()
             )
 
             if valid_ratio >= 0.80:
 
-                result["datetime"].append(
-                    column
-                )
+                result[
+                    "datetime"
+                ].append(column)
 
                 continue
 
@@ -828,25 +1168,34 @@ def detect_column_types(
 
             pass
 
-        # Categorical vs text
+
+        # ----------------------------------------------------
+        # CATEGORICAL / TEXT
+        # ----------------------------------------------------
+
         unique_ratio = (
             series.nunique(
                 dropna=True
             )
-            / max(len(series), 1)
+            / max(
+                len(series),
+                1,
+            )
         )
+
 
         if unique_ratio <= 0.20:
 
-            result["categorical"].append(
-                column
-            )
+            result[
+                "categorical"
+            ].append(column)
 
         else:
 
-            result["text"].append(
-                column
-            )
+            result[
+                "text"
+            ].append(column)
+
 
     return result
 
@@ -859,55 +1208,81 @@ def get_dataset_info(
     df: pd.DataFrame,
 ) -> dict:
 
-    column_types = detect_column_types(
-        df
+    column_types = (
+        detect_column_types(df)
     )
 
+
     return {
-        "rows": len(df),
-        "columns": len(df.columns),
 
-        "memory_mb": round(
-            df.memory_usage(
-                deep=True
-            ).sum()
-            / (1024 * 1024),
-            2,
-        ),
+        "rows":
+            len(df),
 
-        "missing_values": int(
-            df.isna()
-            .sum()
-            .sum()
-        ),
+        "columns":
+            len(df.columns),
 
-        "duplicate_rows": int(
-            df.duplicated().sum()
-        ),
+        "memory_mb":
+            round(
+                df.memory_usage(
+                    deep=True
+                ).sum()
+                / (1024 * 1024),
+                2,
+            ),
 
-        "numeric_columns": len(
-            column_types["numeric"]
-        ),
+        "missing_values":
+            int(
+                df.isna()
+                .sum()
+                .sum()
+            ),
 
-        "categorical_columns": len(
-            column_types["categorical"]
-        ),
+        "duplicate_rows":
+            int(
+                df.duplicated()
+                .sum()
+            ),
 
-        "datetime_columns": len(
-            column_types["datetime"]
-        ),
+        "numeric_columns":
+            len(
+                column_types[
+                    "numeric"
+                ]
+            ),
 
-        "boolean_columns": len(
-            column_types["boolean"]
-        ),
+        "categorical_columns":
+            len(
+                column_types[
+                    "categorical"
+                ]
+            ),
 
-        "text_columns": len(
-            column_types["text"]
-        ),
+        "datetime_columns":
+            len(
+                column_types[
+                    "datetime"
+                ]
+            ),
 
-        "column_types": column_types,
+        "boolean_columns":
+            len(
+                column_types[
+                    "boolean"
+                ]
+            ),
 
-        "capture_metadata": df.attrs.get(
-            "capture_metadata"
-        ),
+        "text_columns":
+            len(
+                column_types[
+                    "text"
+                ]
+            ),
+
+        "column_types":
+            column_types,
+
+        "capture_metadata":
+            df.attrs.get(
+                "capture_metadata"
+            ),
     }
