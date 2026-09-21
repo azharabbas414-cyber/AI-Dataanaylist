@@ -1,233 +1,274 @@
-import streamlit as st
 from pathlib import Path
-from io import BytesIO
+
 import pandas as pd
+import streamlit as st
+
+from core.data_loader import load_dataset, get_dataset_info
 
 
-# =========================================================
-# PAGE CONFIGURATION
-# =========================================================
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 
 st.set_page_config(
     page_title="InsightAI",
-    page_icon="📊",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
-# =========================================================
-# PATHS
-# =========================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-
-
-# =========================================================
+# ============================================================
 # SESSION STATE
-# =========================================================
-
-if "active_dataset" not in st.session_state:
-    st.session_state.active_dataset = None
+# ============================================================
 
 if "active_dataframe" not in st.session_state:
     st.session_state.active_dataframe = None
 
+if "active_dataset" not in st.session_state:
+    st.session_state.active_dataset = None
+
 if "active_source" not in st.session_state:
     st.session_state.active_source = None
 
-
-# =========================================================
-# DATASET DISCOVERY
-# =========================================================
-
-def get_repository_datasets():
-
-    if not DATA_DIR.exists():
-        return []
-
-    files = []
-
-    for pattern in ["*.csv", "*.xlsx", "*.xls"]:
-        files.extend(DATA_DIR.glob(pattern))
-
-    return sorted(files)
+if "dataset_info" not in st.session_state:
+    st.session_state.dataset_info = None
 
 
-repository_datasets = get_repository_datasets()
-
-
-# =========================================================
-# DATA LOADERS
-# =========================================================
-
-@st.cache_data
-def load_repository_file(file_path):
-
-    suffix = file_path.suffix.lower()
-
-    if suffix == ".csv":
-        return pd.read_csv(file_path)
-
-    if suffix in [".xlsx", ".xls"]:
-        return pd.read_excel(file_path)
-
-    raise ValueError(
-        "Unsupported file format."
-    )
-
-
-@st.cache_data
-def load_uploaded_file(
-    file_bytes,
-    file_name,
-):
-
-    suffix = Path(file_name).suffix.lower()
-
-    if suffix == ".csv":
-
-        return pd.read_csv(
-            BytesIO(file_bytes)
-        )
-
-    if suffix in [".xlsx", ".xls"]:
-
-        return pd.read_excel(
-            BytesIO(file_bytes)
-        )
-
-    raise ValueError(
-        "Unsupported file format."
-    )
-
-
-# =========================================================
-# CUSTOM STYLING
-# =========================================================
+# ============================================================
+# CUSTOM CSS
+# ============================================================
 
 st.markdown(
     """
-<style>
+    <style>
 
-.main {
-    padding-top: 1rem;
-}
+    /* --------------------------------------------------------
+       GLOBAL
+    -------------------------------------------------------- */
 
-.hero {
-    padding: 42px;
-    border-radius: 20px;
-    background: linear-gradient(
-        135deg,
-        #eef2f7,
-        #dfe7ef
-    );
-    border: 1px solid #cbd5e1;
-    margin-bottom: 30px;
-}
+    .main {
+        padding-top: 1rem;
+    }
 
-.hero-small {
-    color: #64748b;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 3px;
-}
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 1500px;
+    }
 
-.hero-title {
-    font-size: 52px;
-    font-weight: 800;
-    margin: 10px 0;
-    color: #1e293b;
-}
 
-.hero-text {
-    font-size: 18px;
-    color: #64748b;
-    max-width: 850px;
-}
+    /* --------------------------------------------------------
+       SIDEBAR
+    -------------------------------------------------------- */
 
-.dataset-card {
-    padding: 18px;
-    border-radius: 14px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    min-height: 110px;
-    margin-bottom: 15px;
-}
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid rgba(128, 128, 128, 0.18);
+    }
 
-.dataset-name {
-    font-size: 16px;
-    font-weight: 700;
-    color: #1e293b;
-}
+    .sidebar-brand {
+        text-align: center;
+        padding: 10px 0 20px 0;
+    }
 
-.dataset-type {
-    color: #64748b;
-    font-size: 12px;
-    margin-top: 7px;
-}
+    .sidebar-brand-title {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+    }
 
-.active-card {
-    padding: 20px;
-    border-radius: 14px;
-    border: 1px solid #bfdbfe;
-    background: #eff6ff;
-}
+    .sidebar-brand-subtitle {
+        font-size: 12px;
+        opacity: 0.65;
+        margin-top: -4px;
+    }
 
-.workflow-card {
-    padding: 20px;
-    border-radius: 14px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    min-height: 150px;
-}
 
-.workflow-number {
-    font-size: 13px;
-    font-weight: 800;
-    color: #64748b;
-    letter-spacing: 1px;
-}
+    /* --------------------------------------------------------
+       HERO
+    -------------------------------------------------------- */
 
-.workflow-title {
-    font-size: 20px;
-    font-weight: 750;
-    color: #1e293b;
-    margin-top: 8px;
-}
+    .hero {
+        padding: 35px 38px;
+        border-radius: 20px;
+        margin-bottom: 28px;
+        background:
+            linear-gradient(
+                135deg,
+                rgba(80, 70, 229, 0.14),
+                rgba(30, 144, 255, 0.08)
+            );
+        border: 1px solid rgba(128, 128, 128, 0.18);
+    }
 
-.workflow-text {
-    font-size: 14px;
-    color: #64748b;
-    margin-top: 8px;
-}
+    .hero-title {
+        font-size: 44px;
+        font-weight: 850;
+        letter-spacing: -1.5px;
+        margin-bottom: 8px;
+    }
 
-section[data-testid="stSidebar"] {
-    background-color: #f8fafc;
-}
+    .hero-subtitle {
+        font-size: 18px;
+        opacity: 0.72;
+        max-width: 850px;
+        line-height: 1.6;
+    }
 
-</style>
-""",
+
+    /* --------------------------------------------------------
+       WORKFLOW CARDS
+    -------------------------------------------------------- */
+
+    .workflow-card {
+        padding: 22px;
+        min-height: 155px;
+        border-radius: 16px;
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        background: rgba(128, 128, 128, 0.035);
+        transition: 0.2s ease;
+    }
+
+    .workflow-icon {
+        font-size: 28px;
+        margin-bottom: 10px;
+    }
+
+    .workflow-title {
+        font-size: 18px;
+        font-weight: 750;
+        margin-bottom: 5px;
+    }
+
+    .workflow-text {
+        font-size: 13px;
+        opacity: 0.68;
+        line-height: 1.5;
+    }
+
+
+    /* --------------------------------------------------------
+       SECTION HEADERS
+    -------------------------------------------------------- */
+
+    .section-title {
+        font-size: 25px;
+        font-weight: 800;
+        margin-top: 25px;
+        margin-bottom: 6px;
+    }
+
+    .section-subtitle {
+        font-size: 14px;
+        opacity: 0.65;
+        margin-bottom: 18px;
+    }
+
+
+    /* --------------------------------------------------------
+       ACTIVE DATASET
+    -------------------------------------------------------- */
+
+    .active-card {
+        padding: 24px;
+        border-radius: 18px;
+        border: 1px solid rgba(80, 70, 229, 0.28);
+        background:
+            linear-gradient(
+                135deg,
+                rgba(80, 70, 229, 0.09),
+                rgba(30, 144, 255, 0.04)
+            );
+        margin-bottom: 15px;
+    }
+
+    .active-title {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 12px;
+    }
+
+    .active-value {
+        font-size: 14px;
+        margin-bottom: 5px;
+    }
+
+
+    /* --------------------------------------------------------
+       DATASET CARDS
+    -------------------------------------------------------- */
+
+    .dataset-card {
+        padding: 18px;
+        border-radius: 15px;
+        border: 1px solid rgba(128, 128, 128, 0.16);
+        background: rgba(128, 128, 128, 0.035);
+        min-height: 115px;
+        margin-bottom: 12px;
+    }
+
+    .dataset-name {
+        font-weight: 750;
+        font-size: 15px;
+        margin-bottom: 8px;
+        word-break: break-word;
+    }
+
+    .dataset-meta {
+        font-size: 12px;
+        opacity: 0.65;
+    }
+
+
+    /* --------------------------------------------------------
+       INFO BOX
+    -------------------------------------------------------- */
+
+    .info-box {
+        padding: 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(128, 128, 128, 0.16);
+        background: rgba(128, 128, 128, 0.035);
+        margin: 10px 0;
+    }
+
+
+    /* --------------------------------------------------------
+       FOOTER
+    -------------------------------------------------------- */
+
+    .footer {
+        text-align: center;
+        padding: 35px 0 10px 0;
+        opacity: 0.5;
+        font-size: 12px;
+    }
+
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
 
-# =========================================================
-# SIDEBAR NAVIGATION
-# =========================================================
+# ============================================================
+# SIDEBAR
+# ============================================================
 
 with st.sidebar:
 
-    st.markdown("## ✦ InsightAI")
-
-    st.caption(
-        "AI-Powered Data Analytics Platform"
+    st.markdown(
+        """
+        <div class="sidebar-brand">
+            <div class="sidebar-brand-title">🧠 InsightAI</div>
+            <div class="sidebar-brand-subtitle">
+                AI-Powered Data Intelligence
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.divider()
-
-    st.markdown("### Navigation")
 
     st.page_link(
         "streamlitapp.py",
@@ -271,373 +312,622 @@ with st.sidebar:
 
     st.divider()
 
-    st.metric(
-        "Repository Datasets",
-        len(repository_datasets),
-    )
+    if st.session_state.active_dataframe is not None:
 
-    if st.session_state.active_dataset:
+        st.markdown("### 📌 Active Dataset")
 
-        st.success(
-            f"Active: "
-            f"{st.session_state.active_dataset}"
+        st.caption(
+            st.session_state.active_dataset
+        )
+
+        st.caption(
+            f"{len(st.session_state.active_dataframe):,} rows × "
+            f"{len(st.session_state.active_dataframe.columns):,} columns"
         )
 
     else:
 
         st.caption(
-            "No active dataset"
+            "No dataset selected."
         )
 
 
-# =========================================================
+# ============================================================
 # HERO
-# =========================================================
-
-hero_html = """
-<div class="hero">
-
-<div class="hero-small">
-INTELLIGENT DATA ANALYTICS
-</div>
-
-<div class="hero-title">
-InsightAI
-</div>
-
-<div class="hero-text">
-Transform raw data into interactive analytics,
-intelligent insights and decision-ready information.
-</div>
-
-</div>
-"""
+# ============================================================
 
 st.markdown(
-    hero_html,
+    """
+    <div class="hero">
+
+        <div class="hero-title">
+            🧠 InsightAI
+        </div>
+
+        <div class="hero-subtitle">
+            AI-powered data analytics and decision intelligence
+            platform for exploring, cleaning, analyzing,
+            forecasting and understanding your data.
+        </div>
+
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
 
-# =========================================================
+# ============================================================
 # WORKFLOW
-# =========================================================
+# ============================================================
 
 st.markdown(
-    "## How InsightAI Works"
+    '<div class="section-title">Your Analytics Workflow</div>',
+    unsafe_allow_html=True,
 )
 
-col1, col2, col3, col4 = st.columns(4)
+st.markdown(
+    '<div class="section-subtitle">'
+    'From raw data to actionable insights.'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+workflow_cols = st.columns(4)
+
+workflow = [
+    (
+        workflow_cols[0],
+        "📂",
+        "1. Select",
+        "Upload your dataset or select a dataset from the repository.",
+    ),
+    (
+        workflow_cols[1],
+        "🧹",
+        "2. Clean",
+        "Identify and fix missing values, duplicates and data-quality issues.",
+    ),
+    (
+        workflow_cols[2],
+        "📊",
+        "3. Explore",
+        "Understand distributions, relationships, statistics and trends.",
+    ),
+    (
+        workflow_cols[3],
+        "🤖",
+        "4. Analyze",
+        "Use AI, anomaly detection, forecasting and advanced analytics.",
+    ),
+]
+
+for col, icon, title, description in workflow:
+
+    with col:
+
+        st.markdown(
+            f"""
+            <div class="workflow-card">
+
+                <div class="workflow-icon">
+                    {icon}
+                </div>
+
+                <div class="workflow-title">
+                    {title}
+                </div>
+
+                <div class="workflow-text">
+                    {description}
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
-with col1:
-
-    st.markdown(
-        """
-        <div class="workflow-card">
-
-        <div class="workflow-number">
-        01 · SELECT
-        </div>
-
-        <div class="workflow-title">
-        Choose Data
-        </div>
-
-        <div class="workflow-text">
-        Select an existing dataset from
-        GitHub or upload a new CSV/Excel file.
-        </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.write("")
 
 
-with col2:
-
-    st.markdown(
-        """
-        <div class="workflow-card">
-
-        <div class="workflow-number">
-        02 · CLEAN
-        </div>
-
-        <div class="workflow-title">
-        Prepare Data
-        </div>
-
-        <div class="workflow-text">
-        Fix missing values, duplicates,
-        data types, text and other quality issues.
-        </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-with col3:
-
-    st.markdown(
-        """
-        <div class="workflow-card">
-
-        <div class="workflow-number">
-        03 · EXPLORE
-        </div>
-
-        <div class="workflow-title">
-        Understand Data
-        </div>
-
-        <div class="workflow-text">
-        Explore statistics, relationships,
-        distributions, trends and data quality.
-        </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-with col4:
-
-    st.markdown(
-        """
-        <div class="workflow-card">
-
-        <div class="workflow-number">
-        04 · ANALYZE
-        </div>
-
-        <div class="workflow-title">
-        Discover Insights
-        </div>
-
-        <div class="workflow-text">
-        Use AI, dashboards, anomaly detection,
-        forecasting and professional reports.
-        </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-st.divider()
-
-
-# =========================================================
+# ============================================================
 # DATA SOURCE
-# =========================================================
+# ============================================================
 
 st.markdown(
-    "## Choose Your Data Source"
+    '<div class="section-title">📂 Select Your Data</div>',
+    unsafe_allow_html=True,
 )
 
-existing_tab, upload_tab = st.tabs(
+st.markdown(
+    '<div class="section-subtitle">'
+    'Upload almost any common tabular data format. '
+    'InsightAI automatically detects the file type and '
+    'builds a dataset profile.'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+
+source_tab1, source_tab2 = st.tabs(
     [
-        "📁 Existing GitHub Datasets",
+        "📚 Repository Datasets",
         "⬆️ Upload New Dataset",
     ]
 )
 
 
-# =========================================================
-# EXISTING DATASETS
-# =========================================================
+# ============================================================
+# REPOSITORY DATASETS
+# ============================================================
 
-with existing_tab:
+with source_tab1:
 
-    st.markdown(
-        "### Repository Datasets"
-    )
+    data_folder = Path("data")
 
-    st.caption(
-        "These datasets are already stored in "
-        "the GitHub `data/` folder."
-    )
+    if data_folder.exists():
 
-    if not repository_datasets:
+        supported_files = [
+            file
+            for file in data_folder.iterdir()
+            if file.is_file()
+            and file.suffix.lower()
+            in [
+                ".csv",
+                ".xlsx",
+                ".xls",
+                ".json",
+                ".parquet",
+                ".txt",
+                ".tsv",
+                ".ods",
+            ]
+        ]
 
-        st.warning(
-            "No CSV or Excel datasets were found "
-            "in the data folder."
+    else:
+
+        supported_files = []
+
+
+    if not supported_files:
+
+        st.info(
+            "No repository datasets were found in the data folder."
         )
 
     else:
 
-        dataset_names = [
+        st.write(
+            f"**{len(supported_files)} datasets available**"
+        )
+
+        dataset_options = [
             file.name
-            for file in repository_datasets
+            for file in supported_files
         ]
 
-        selected_name = st.selectbox(
-            "Select a dataset",
-            dataset_names,
+        selected_dataset = st.selectbox(
+            "Choose a dataset",
+            dataset_options,
             key="repository_dataset_selector",
         )
 
-        selected_file = (
-            DATA_DIR / selected_name
-        )
+        selected_path = data_folder / selected_dataset
 
         if st.button(
-            "📊 Use This Dataset",
+            "📂 Load Selected Dataset",
             type="primary",
             use_container_width=True,
-            key="use_repository_dataset",
+            key="load_repository_dataset",
         ):
 
             try:
 
-                dataframe = load_repository_file(
-                    selected_file
+                # Repository files are loaded using the same
+                # universal loader used for uploaded files.
+
+                class LocalUploadedFile:
+
+                    def __init__(self, path):
+
+                        self.name = path.name
+
+                        with open(path, "rb") as file:
+                            self._bytes = file.read()
+
+                    def getvalue(self):
+
+                        return self._bytes
+
+
+                local_file = LocalUploadedFile(
+                    selected_path
                 )
+
+                df, detected_type = load_dataset(
+                    local_file
+                )
+
+                info = get_dataset_info(df)
+
+                st.session_state.active_dataframe = df
 
                 st.session_state.active_dataset = (
-                    selected_name
-                )
-
-                st.session_state.active_dataframe = (
-                    dataframe
+                    selected_dataset
                 )
 
                 st.session_state.active_source = (
-                    "GitHub Repository"
+                    f"Repository • {detected_type}"
                 )
+
+                st.session_state.dataset_info = info
 
                 st.success(
-                    f"{selected_name} loaded successfully."
+                    f"✓ {selected_dataset} loaded successfully."
                 )
 
-            except Exception as error:
+                st.rerun()
+
+            except Exception as exc:
 
                 st.error(
-                    f"Unable to load dataset: {error}"
+                    f"Unable to load dataset: {exc}"
                 )
 
 
-# =========================================================
-# UPLOAD DATASET
-# =========================================================
+# ============================================================
+# UNIVERSAL FILE UPLOAD
+# ============================================================
 
-with upload_tab:
+with source_tab2:
 
     st.markdown(
-        "### Upload a New Dataset"
+        """
+        <div class="info-box">
+
+        <b>Universal Dataset Upload</b><br>
+
+        Upload CSV, Excel, JSON, Parquet, TXT, TSV or
+        OpenDocument spreadsheet files.
+
+        InsightAI will automatically detect the format
+        after upload.
+
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.caption(
-        "Use this option when you want to analyze "
-        "a dataset that is not stored in GitHub."
-    )
 
     uploaded_file = st.file_uploader(
-        "Choose CSV or Excel file",
+        "Choose a dataset",
         type=[
             "csv",
             "xlsx",
             "xls",
+            "json",
+            "parquet",
+            "txt",
+            "tsv",
+            "ods",
         ],
-        accept_multiple_files=False,
-        key="new_dataset_uploader",
+        key="universal_dataset_upload",
     )
+
 
     if uploaded_file is not None:
 
+        file_size_mb = (
+            uploaded_file.size
+            / (1024 * 1024)
+        )
+
+        st.caption(
+            f"File: **{uploaded_file.name}**  |  "
+            f"Size: **{file_size_mb:.2f} MB**"
+        )
+
+
         try:
 
-            file_bytes = (
-                uploaded_file.getvalue()
-            )
+            with st.spinner(
+                "Detecting file type and loading dataset..."
+            ):
 
-            dataframe = load_uploaded_file(
-                file_bytes,
-                uploaded_file.name,
-            )
+                df, detected_type = load_dataset(
+                    uploaded_file
+                )
+
+                info = get_dataset_info(df)
+
+
+            # ------------------------------------------------
+            # SAVE ACTIVE DATASET
+            # ------------------------------------------------
+
+            st.session_state.active_dataframe = df
 
             st.session_state.active_dataset = (
                 uploaded_file.name
             )
 
-            st.session_state.active_dataframe = (
-                dataframe
+            st.session_state.active_source = (
+                f"Uploaded File • {detected_type}"
             )
 
-            st.session_state.active_source = (
-                "Uploaded File"
-            )
+            st.session_state.dataset_info = info
+
 
             st.success(
-                f"{uploaded_file.name} loaded successfully."
+                f"✓ File detected as **{detected_type}** "
+                "and loaded successfully."
             )
 
-        except Exception as error:
+
+            # ------------------------------------------------
+            # DATASET METRICS
+            # ------------------------------------------------
+
+            st.markdown("### Dataset Summary")
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric(
+                "Rows",
+                f"{info['rows']:,}",
+            )
+
+            c2.metric(
+                "Columns",
+                f"{info['columns']:,}",
+            )
+
+            c3.metric(
+                "Missing Values",
+                f"{info['missing_values']:,}",
+            )
+
+            c4.metric(
+                "Duplicate Rows",
+                f"{info['duplicate_rows']:,}",
+            )
+
+
+            # ------------------------------------------------
+            # DETECTED TYPES
+            # ------------------------------------------------
+
+            st.markdown(
+                "### 🔍 Automatically Detected Data Types"
+            )
+
+            type_cols = st.columns(5)
+
+            type_cols[0].metric(
+                "🔢 Numeric",
+                len(
+                    info["column_types"]["numeric"]
+                ),
+            )
+
+            type_cols[1].metric(
+                "🔤 Categorical",
+                len(
+                    info["column_types"]["categorical"]
+                ),
+            )
+
+            type_cols[2].metric(
+                "📅 Date / Time",
+                len(
+                    info["column_types"]["datetime"]
+                ),
+            )
+
+            type_cols[3].metric(
+                "🔘 Boolean",
+                len(
+                    info["column_types"]["boolean"]
+                ),
+            )
+
+            type_cols[4].metric(
+                "📝 Text",
+                len(
+                    info["column_types"]["text"]
+                ),
+            )
+
+
+            # ------------------------------------------------
+            # DETECTED COLUMNS
+            # ------------------------------------------------
+
+            with st.expander(
+                "View detected column classifications"
+            ):
+
+                detected_types_df = pd.DataFrame(
+                    {
+                        "Data Type": [
+                            "Numeric",
+                            "Categorical",
+                            "Date / Time",
+                            "Boolean",
+                            "Text",
+                        ],
+                        "Columns": [
+                            ", ".join(
+                                map(
+                                    str,
+                                    info["column_types"][
+                                        "numeric"
+                                    ],
+                                )
+                            ),
+                            ", ".join(
+                                map(
+                                    str,
+                                    info["column_types"][
+                                        "categorical"
+                                    ],
+                                )
+                            ),
+                            ", ".join(
+                                map(
+                                    str,
+                                    info["column_types"][
+                                        "datetime"
+                                    ],
+                                )
+                            ),
+                            ", ".join(
+                                map(
+                                    str,
+                                    info["column_types"][
+                                        "boolean"
+                                    ],
+                                )
+                            ),
+                            ", ".join(
+                                map(
+                                    str,
+                                    info["column_types"][
+                                        "text"
+                                    ],
+                                )
+                            ),
+                        ],
+                    }
+                )
+
+                st.dataframe(
+                    detected_types_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+
+            # ------------------------------------------------
+            # PREVIEW
+            # ------------------------------------------------
+
+            st.markdown(
+                "### 👀 Data Preview"
+            )
+
+            st.dataframe(
+                df.head(10),
+                use_container_width=True,
+                height=350,
+            )
+
+
+        except Exception as exc:
 
             st.error(
-                f"Unable to read dataset: {error}"
+                f"❌ Unable to load this file."
             )
 
+            st.exception(exc)
 
-st.divider()
 
-
-# =========================================================
+# ============================================================
 # ACTIVE DATASET
-# =========================================================
-
-st.markdown(
-    "## 🎯 Active Dataset"
-)
-
+# ============================================================
 
 if st.session_state.active_dataframe is not None:
 
-    active_df = (
-        st.session_state.active_dataframe
-    )
+    active_df = st.session_state.active_dataframe
 
-    active_html = f"""
-<div class="active-card">
+    info = st.session_state.dataset_info
 
-<b>Dataset:</b>
-{st.session_state.active_dataset}
-
-<br>
-
-<b>Source:</b>
-{st.session_state.active_source}
-
-<br>
-
-<b>Rows:</b>
-{len(active_df):,}
-
-<br>
-
-<b>Columns:</b>
-{len(active_df.columns):,}
-
-</div>
-"""
+    st.divider()
 
     st.markdown(
-        active_html,
+        '<div class="section-title">📌 Active Dataset</div>',
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        f"""
+        <div class="active-card">
+
+            <div class="active-title">
+                {st.session_state.active_dataset}
+            </div>
+
+            <div class="active-value">
+                <b>Source:</b>
+                {st.session_state.active_source}
+            </div>
+
+            <div class="active-value">
+                <b>Rows:</b>
+                {len(active_df):,}
+            </div>
+
+            <div class="active-value">
+                <b>Columns:</b>
+                {len(active_df.columns):,}
+            </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+    # --------------------------------------------------------
+    # ACTIVE DATASET METRICS
+    # --------------------------------------------------------
+
+    if info is None:
+
+        info = get_dataset_info(active_df)
+
+        st.session_state.dataset_info = info
+
+
+    metric_cols = st.columns(6)
+
+    metric_cols[0].metric(
+        "Rows",
+        f"{info['rows']:,}",
+    )
+
+    metric_cols[1].metric(
+        "Columns",
+        f"{info['columns']:,}",
+    )
+
+    metric_cols[2].metric(
+        "Missing",
+        f"{info['missing_values']:,}",
+    )
+
+    metric_cols[3].metric(
+        "Duplicates",
+        f"{info['duplicate_rows']:,}",
+    )
+
+    metric_cols[4].metric(
+        "Numeric",
+        f"{info['numeric_columns']:,}",
+    )
+
+    metric_cols[5].metric(
+        "Date / Time",
+        f"{info['datetime_columns']:,}",
+    )
+
+
     st.write("")
 
-    # -----------------------------------------------------
-    # MAIN DATA PREPARATION ACTION
-    # -----------------------------------------------------
+
+    # --------------------------------------------------------
+    # OPEN DATA CLEANING
+    # --------------------------------------------------------
 
     if st.button(
         "🧹 Open Data Cleaning",
@@ -650,69 +940,106 @@ if st.session_state.active_dataframe is not None:
             "pages/00_Data_Cleaning.py"
         )
 
+
+# ============================================================
+# REPOSITORY SUMMARY
+# ============================================================
+
+st.divider()
+
+st.markdown(
+    '<div class="section-title">📚 Repository Datasets</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="section-subtitle">'
+    'Datasets currently available inside the InsightAI repository.'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+
+if supported_files:
+
+    summary_data = []
+
+    for file in supported_files:
+
+        try:
+
+            class LocalFile:
+
+                def __init__(self, path):
+
+                    self.name = path.name
+
+                    with open(path, "rb") as f:
+                        self._bytes = f.read()
+
+                def getvalue(self):
+                    return self._bytes
+
+
+            local_file = LocalFile(file)
+
+            temp_df, temp_type = load_dataset(
+                local_file
+            )
+
+            summary_data.append(
+                {
+                    "Dataset": file.name,
+                    "Type": temp_type,
+                    "Rows": len(temp_df),
+                    "Columns": len(temp_df.columns),
+                }
+            )
+
+        except Exception:
+
+            summary_data.append(
+                {
+                    "Dataset": file.name,
+                    "Type": "Unable to read",
+                    "Rows": "-",
+                    "Columns": "-",
+                }
+            )
+
+
+    summary_df = pd.DataFrame(
+        summary_data
+    )
+
+    st.dataframe(
+        summary_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
 else:
 
     st.info(
-        "Select an existing dataset or upload "
-        "a new dataset to begin analysis."
+        "No repository datasets available."
     )
 
 
-st.divider()
-
-
-# =========================================================
-# REPOSITORY DATASET SUMMARY
-# =========================================================
+# ============================================================
+# FOOTER
+# ============================================================
 
 st.markdown(
-    "## 📁 Repository Dataset Summary"
-)
+    """
+    <div class="footer">
 
-if repository_datasets:
+        InsightAI • AI-Powered Data Intelligence Platform
 
-    cols = st.columns(3)
+        <br>
 
-    for index, dataset in enumerate(
-        repository_datasets
-    ):
+        Analyze • Understand • Decide
 
-        with cols[index % 3]:
-
-            size_kb = (
-                dataset.stat().st_size
-                / 1024
-            )
-
-            dataset_html = f"""
-<div class="dataset-card">
-
-<div class="dataset-name">
-📄 {dataset.stem}
-</div>
-
-<div class="dataset-type">
-{dataset.suffix.upper()[1:]}
-•
-{size_kb:.1f} KB
-</div>
-
-</div>
-"""
-
-            st.markdown(
-                dataset_html,
-                unsafe_allow_html=True,
-            )
-
-
-# =========================================================
-# FOOTER
-# =========================================================
-
-st.divider()
-
-st.caption(
-    "InsightAI • AI-Powered Data Analytics "
-    "& Decision Intelligence Platform"
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
