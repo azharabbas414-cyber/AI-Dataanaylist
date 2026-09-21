@@ -465,17 +465,24 @@ if st.session_state.active_dataframe is not None:
 
     st.write("")
 
+col_clean, col_explore = st.columns(2)
+
+with col_clean:
+    if st.button(
+        "🧹 Open Data Cleaning",
+        type="primary",
+        use_container_width=True,
+        key="open_data_cleaning",
+    ):
+        st.switch_page("pages/00_Data_Cleaning.py")
+
+with col_explore:
     if st.button(
         "📊 Open Data Explorer",
-        type="primary",
         use_container_width=True,
         key="open_data_explorer",
     ):
-
-        st.switch_page(
-            "pages/01_Data_Explorer.py"
-        )
-
+        st.switch_page("pages/01_Data_Explorer.py")
 else:
 
     st.info(
