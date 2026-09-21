@@ -5,68 +5,155 @@ from sklearn.ensemble import RandomForestRegressor
 
 
 # =========================================================
-# DATE DETECTION
+# SAFE DATE PARSING
 # =========================================================
 
 def _parse_date_series(series):
     """
-    Try to convert a column into datetime using
-    several common real-world date formats.
+    Safely convert a pandas Series into datetime.
+
+    Supports:
+    - datetime columns
+    - normal date strings
+    - timestamps
+    - YYYY-MM-DD
+    - DD/MM/YYYY
+    - MM/DD/YYYY
+    - YYYYMMDD
+    - YYYYMM
+
+    Numeric columns that are clearly not dates are
+    ignored safely.
     """
 
+    # -----------------------------------------------------
     # Already datetime
+    # -----------------------------------------------------
+
     if pd.api.types.is_datetime64_any_dtype(series):
-        return pd.to_datetime(series, errors="coerce")
 
-    # Numeric date formats such as:
-    # 20230115
-    # 202301
-    if pd.api.types.is_numeric_dtype(series):
-
-        numeric = series.dropna()
-
-        if numeric.empty:
-            return pd.to_datetime(
-                series,
-                errors="coerce"
-            )
-
-        # YYYYMMDD
-        values_as_text = (
-            numeric.astype("Int64")
-            .astype(str)
+        return pd.to_datetime(
+            series,
+            errors="coerce",
         )
 
-        if (
-            values_as_text.str.len().eq(8).mean()
-            >= 0.80
-        ):
+    # -----------------------------------------------------
+    # Numeric columns
+    # -----------------------------------------------------
+
+    if pd.api.types.is_numeric_dtype(series):
+
+        numeric = pd.to_numeric(
+            series,
+            errors="coerce",
+        )
+
+        numeric = numeric.dropna()
+
+        if numeric.empty:
+
+            return pd.Series(
+                pd.NaT,
+                index=series.index,
+                dtype="datetime64[ns]",
+            )
+
+        # Check whether values are integer-like.
+        # Do NOT cast directly to Int64 because a numeric
+        # column may contain decimal values.
+        integer_like = (
+            np.isfinite(numeric)
+            & np.isclose(
+                numeric,
+                np.round(numeric),
+            )
+        )
+
+        if integer_like.mean() < 0.80:
+
+            return pd.Series(
+                pd.NaT,
+                index=series.index,
+                dtype="datetime64[ns]",
+            )
+
+        integer_values = numeric[
+            integer_like
+        ].round().astype("int64")
+
+        text_values = integer_values.astype(str)
+
+        # -------------------------------------------------
+        # YYYYMMDD
+        # -------------------------------------------------
+
+        eight_digit = (
+            text_values.str.len() == 8
+        )
+
+        if eight_digit.mean() >= 0.70:
 
             parsed = pd.to_datetime(
-                series.astype("Int64").astype(str),
+                integer_values.astype(str),
                 format="%Y%m%d",
                 errors="coerce",
             )
 
             if parsed.notna().mean() >= 0.70:
-                return parsed
 
+                result = pd.Series(
+                    pd.NaT,
+                    index=series.index,
+                    dtype="datetime64[ns]",
+                )
+
+                result.loc[
+                    integer_values.index
+                ] = parsed
+
+                return result
+
+        # -------------------------------------------------
         # YYYYMM
-        if (
-            values_as_text.str.len().eq(6).mean()
-            >= 0.80
-        ):
+        # -------------------------------------------------
+
+        six_digit = (
+            text_values.str.len() == 6
+        )
+
+        if six_digit.mean() >= 0.70:
 
             parsed = pd.to_datetime(
-                series.astype("Int64").astype(str),
+                integer_values.astype(str),
                 format="%Y%m",
                 errors="coerce",
             )
 
             if parsed.notna().mean() >= 0.70:
-                return parsed
 
-    # Standard parsing
+                result = pd.Series(
+                    pd.NaT,
+                    index=series.index,
+                    dtype="datetime64[ns]",
+                )
+
+                result.loc[
+                    integer_values.index
+                ] = parsed
+
+                return result
+
+        # Not a date-like numeric column.
+        return pd.Series(
+            pd.NaT,
+            index=series.index,
+            dtype="datetime64[ns]",
+        )
+
+    # -----------------------------------------------------
+    # Text / object columns
+    # -----------------------------------------------------
+
     try:
 
         parsed = pd.to_datetime(
@@ -85,18 +172,13 @@ def _parse_date_series(series):
     return parsed
 
 
+# =========================================================
+# DATE COLUMN DETECTION
+# =========================================================
+
 def detect_datetime_columns(df):
     """
-    Automatically detect columns containing
-    date/time information.
-
-    Handles:
-    - datetime columns
-    - date strings
-    - timestamps
-    - YYYYMMDD
-    - YYYYMM
-    - columns with date/time-related names
+    Detect columns that contain date/time information.
     """
 
     datetime_columns = []
@@ -110,72 +192,80 @@ def detect_datetime_columns(df):
         "year",
         "day",
         "period",
+        "created",
+        "updated",
+        "start",
+        "end",
     ]
 
     for column in df.columns:
 
         series = df[column]
 
-        column_name = str(column).lower()
+        column_name = str(
+            column
+        ).strip().lower()
 
-        parsed = _parse_date_series(series)
+        parsed = _parse_date_series(
+            series
+        )
+
+        if len(parsed) == 0:
+            continue
 
         valid_ratio = (
             parsed.notna().mean()
-            if len(parsed) > 0
-            else 0
         )
 
-        # Strong automatic date detection
+        # -------------------------------------------------
+        # Strong date detection
+        # -------------------------------------------------
+
         if valid_ratio >= 0.70:
 
-            # Avoid treating ordinary small integers
-            # as dates unless the column name indicates time.
-            if pd.api.types.is_numeric_dtype(series):
+            # Numeric columns need stronger evidence
+            # because ordinary numbers can otherwise
+            # be mistaken for dates.
+            if pd.api.types.is_numeric_dtype(
+                series
+            ):
 
                 if any(
                     keyword in column_name
                     for keyword in date_keywords
                 ):
 
-                    datetime_columns.append(column)
-
-                else:
-
-                    numeric_values = series.dropna()
-
-                    if not numeric_values.empty:
-
-                        minimum = numeric_values.min()
-                        maximum = numeric_values.max()
-
-                        # Reasonable year/date range
-                        if (
-                            maximum >= 19000101
-                            and maximum <= 21001231
-                        ):
-                            datetime_columns.append(
-                                column
-                            )
+                    datetime_columns.append(
+                        column
+                    )
 
             else:
 
-                datetime_columns.append(column)
+                datetime_columns.append(
+                    column
+                )
 
             continue
 
-        # Column name strongly suggests date/time.
-        # Include it if at least some values can parse.
+        # -------------------------------------------------
+        # Column name indicates date/time
+        # -------------------------------------------------
+
         if any(
             keyword in column_name
             for keyword in date_keywords
         ):
 
             if valid_ratio >= 0.30:
-                datetime_columns.append(column)
+
+                datetime_columns.append(
+                    column
+                )
 
     return list(
-        dict.fromkeys(datetime_columns)
+        dict.fromkeys(
+            datetime_columns
+        )
     )
 
 
@@ -188,6 +278,23 @@ def prepare_time_series(
     date_column,
     value_column,
 ):
+    """
+    Prepare a clean time-series dataframe.
+    """
+
+    if date_column not in df.columns:
+
+        raise ValueError(
+            f"Date column '{date_column}' "
+            "was not found."
+        )
+
+    if value_column not in df.columns:
+
+        raise ValueError(
+            f"Value column '{value_column}' "
+            "was not found."
+        )
 
     data = df[
         [
@@ -196,15 +303,20 @@ def prepare_time_series(
         ]
     ].copy()
 
-    data[date_column] = _parse_date_series(
-        data[date_column]
+    # Parse date
+    data[date_column] = (
+        _parse_date_series(
+            data[date_column]
+        )
     )
 
+    # Convert value to numeric
     data[value_column] = pd.to_numeric(
         data[value_column],
         errors="coerce",
     )
 
+    # Remove invalid observations
     data = data.dropna(
         subset=[
             date_column,
@@ -212,10 +324,20 @@ def prepare_time_series(
         ]
     )
 
+    if data.empty:
+
+        raise ValueError(
+            "No valid date/value observations "
+            "were found."
+        )
+
+    # Sort chronologically
     data = data.sort_values(
         date_column
     )
 
+    # If multiple measurements exist on the
+    # same date, use the average.
     data = data.groupby(
         date_column,
         as_index=False,
@@ -233,6 +355,10 @@ def create_features(
     date_column,
     value_column,
 ):
+    """
+    Create machine-learning features from
+    the time series.
+    """
 
     result = data.copy()
 
@@ -288,7 +414,7 @@ def create_features(
 
 
 # =========================================================
-# FORECAST MODEL
+# BUILD FORECAST
 # =========================================================
 
 def build_forecast(
@@ -297,6 +423,10 @@ def build_forecast(
     value_column,
     forecast_periods=7,
 ):
+    """
+    Train forecasting model and generate
+    future predictions.
+    """
 
     data = prepare_time_series(
         df,
@@ -307,8 +437,8 @@ def build_forecast(
     if len(data) < 15:
 
         raise ValueError(
-            "At least 15 valid time-series observations "
-            "are required for forecasting."
+            "At least 15 valid time-series "
+            "observations are required."
         )
 
     featured = create_features(
@@ -331,13 +461,17 @@ def build_forecast(
         "rolling_mean_7",
     ]
 
-    training_data = featured.dropna().copy()
+    training_data = (
+        featured
+        .dropna()
+        .copy()
+    )
 
     if len(training_data) < 10:
 
         raise ValueError(
-            "Not enough complete observations after "
-            "creating forecasting features."
+            "Not enough complete observations "
+            "after feature creation."
         )
 
     X = training_data[
@@ -368,7 +502,10 @@ def build_forecast(
         date_column
     ].max()
 
-    # Determine the normal time interval
+    # -----------------------------------------------------
+    # Detect normal time interval
+    # -----------------------------------------------------
+
     date_differences = (
         data[date_column]
         .diff()
@@ -387,13 +524,21 @@ def build_forecast(
             days=1
         )
 
-    if median_interval <= pd.Timedelta(0):
+    if (
+        pd.isna(median_interval)
+        or median_interval
+        <= pd.Timedelta(0)
+    ):
 
         median_interval = pd.Timedelta(
             days=1
         )
 
     predictions = []
+
+    # -----------------------------------------------------
+    # Generate future values
+    # -----------------------------------------------------
 
     for step in range(
         1,
@@ -500,6 +645,9 @@ def calculate_model_accuracy(
     date_column,
     value_column,
 ):
+    """
+    Calculate basic hold-out forecasting accuracy.
+    """
 
     data = prepare_time_series(
         df,
@@ -540,7 +688,7 @@ def calculate_model_accuracy(
         return None
 
     split_index = int(
-        len(training_data) * 0.8
+        len(training_data) * 0.80
     )
 
     train = training_data.iloc[
@@ -577,7 +725,8 @@ def calculate_model_accuracy(
 
     mae = np.mean(
         np.abs(
-            actual - predictions
+            actual
+            - predictions
         )
     )
 
