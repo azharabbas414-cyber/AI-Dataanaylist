@@ -7,7 +7,7 @@ from core.data_loader import load_dataset, get_dataset_info
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -34,6 +34,9 @@ if "active_source" not in st.session_state:
 if "dataset_info" not in st.session_state:
     st.session_state.dataset_info = None
 
+if "capture_metadata" not in st.session_state:
+    st.session_state.capture_metadata = None
+
 
 # ============================================================
 # CUSTOM CSS
@@ -42,10 +45,6 @@ if "dataset_info" not in st.session_state:
 st.markdown(
     """
     <style>
-
-    /* --------------------------------------------------------
-       GLOBAL
-    -------------------------------------------------------- */
 
     .main {
         padding-top: 1rem;
@@ -57,10 +56,7 @@ st.markdown(
         max-width: 1500px;
     }
 
-
-    /* --------------------------------------------------------
-       SIDEBAR
-    -------------------------------------------------------- */
+    /* SIDEBAR */
 
     section[data-testid="stSidebar"] {
         border-right: 1px solid rgba(128, 128, 128, 0.18);
@@ -83,10 +79,7 @@ st.markdown(
         margin-top: -4px;
     }
 
-
-    /* --------------------------------------------------------
-       HERO
-    -------------------------------------------------------- */
+    /* HERO */
 
     .hero {
         padding: 35px 38px;
@@ -115,10 +108,7 @@ st.markdown(
         line-height: 1.6;
     }
 
-
-    /* --------------------------------------------------------
-       WORKFLOW CARDS
-    -------------------------------------------------------- */
+    /* WORKFLOW */
 
     .workflow-card {
         padding: 22px;
@@ -126,7 +116,6 @@ st.markdown(
         border-radius: 16px;
         border: 1px solid rgba(128, 128, 128, 0.18);
         background: rgba(128, 128, 128, 0.035);
-        transition: 0.2s ease;
     }
 
     .workflow-icon {
@@ -146,10 +135,7 @@ st.markdown(
         line-height: 1.5;
     }
 
-
-    /* --------------------------------------------------------
-       SECTION HEADERS
-    -------------------------------------------------------- */
+    /* SECTION */
 
     .section-title {
         font-size: 25px;
@@ -164,10 +150,7 @@ st.markdown(
         margin-bottom: 18px;
     }
 
-
-    /* --------------------------------------------------------
-       ACTIVE DATASET
-    -------------------------------------------------------- */
+    /* ACTIVE DATASET */
 
     .active-card {
         padding: 24px;
@@ -193,36 +176,7 @@ st.markdown(
         margin-bottom: 5px;
     }
 
-
-    /* --------------------------------------------------------
-       DATASET CARDS
-    -------------------------------------------------------- */
-
-    .dataset-card {
-        padding: 18px;
-        border-radius: 15px;
-        border: 1px solid rgba(128, 128, 128, 0.16);
-        background: rgba(128, 128, 128, 0.035);
-        min-height: 115px;
-        margin-bottom: 12px;
-    }
-
-    .dataset-name {
-        font-weight: 750;
-        font-size: 15px;
-        margin-bottom: 8px;
-        word-break: break-word;
-    }
-
-    .dataset-meta {
-        font-size: 12px;
-        opacity: 0.65;
-    }
-
-
-    /* --------------------------------------------------------
-       INFO BOX
-    -------------------------------------------------------- */
+    /* INFO */
 
     .info-box {
         padding: 18px;
@@ -232,10 +186,7 @@ st.markdown(
         margin: 10px 0;
     }
 
-
-    /* --------------------------------------------------------
-       FOOTER
-    -------------------------------------------------------- */
+    /* FOOTER */
 
     .footer {
         text-align: center;
@@ -251,6 +202,25 @@ st.markdown(
 
 
 # ============================================================
+# SUPPORTED FILE TYPES
+# ============================================================
+
+SUPPORTED_UPLOAD_TYPES = [
+    "csv",
+    "xlsx",
+    "xls",
+    "json",
+    "parquet",
+    "txt",
+    "tsv",
+    "ods",
+    "pcap",
+    "pcapng",
+    "cap",
+]
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
@@ -259,7 +229,10 @@ with st.sidebar:
     st.markdown(
         """
         <div class="sidebar-brand">
-            <div class="sidebar-brand-title">🧠 InsightAI</div>
+            <div class="sidebar-brand-title">
+                🧠 InsightAI
+            </div>
+
             <div class="sidebar-brand-subtitle">
                 AI-Powered Data Intelligence
             </div>
@@ -321,8 +294,10 @@ with st.sidebar:
         )
 
         st.caption(
-            f"{len(st.session_state.active_dataframe):,} rows × "
-            f"{len(st.session_state.active_dataframe.columns):,} columns"
+            f"{len(st.session_state.active_dataframe):,} "
+            f"rows × "
+            f"{len(st.session_state.active_dataframe.columns):,} "
+            f"columns"
         )
 
     else:
@@ -361,7 +336,9 @@ st.markdown(
 # ============================================================
 
 st.markdown(
-    '<div class="section-title">Your Analytics Workflow</div>',
+    '<div class="section-title">'
+    'Your Analytics Workflow'
+    '</div>',
     unsafe_allow_html=True,
 )
 
@@ -435,15 +412,16 @@ st.write("")
 # ============================================================
 
 st.markdown(
-    '<div class="section-title">📂 Select Your Data</div>',
+    '<div class="section-title">'
+    '📂 Select Your Data'
+    '</div>',
     unsafe_allow_html=True,
 )
 
 st.markdown(
     '<div class="section-subtitle">'
-    'Upload almost any common tabular data format. '
-    'InsightAI automatically detects the file type and '
-    'builds a dataset profile.'
+    'Upload a supported data file and InsightAI will automatically '
+    'detect the format and create a dataset profile.'
     '</div>',
     unsafe_allow_html=True,
 )
@@ -455,6 +433,24 @@ source_tab1, source_tab2 = st.tabs(
         "⬆️ Upload New Dataset",
     ]
 )
+
+
+# ============================================================
+# LOCAL REPOSITORY FILE CLASS
+# ============================================================
+
+class LocalUploadedFile:
+
+    def __init__(self, path: Path):
+
+        self.name = path.name
+
+        with open(path, "rb") as file:
+            self._bytes = file.read()
+
+    def getvalue(self):
+
+        return self._bytes
 
 
 # ============================================================
@@ -470,18 +466,23 @@ with source_tab1:
         supported_files = [
             file
             for file in data_folder.iterdir()
-            if file.is_file()
-            and file.suffix.lower()
-            in [
-                ".csv",
-                ".xlsx",
-                ".xls",
-                ".json",
-                ".parquet",
-                ".txt",
-                ".tsv",
-                ".ods",
-            ]
+            if (
+                file.is_file()
+                and file.suffix.lower()
+                in [
+                    ".csv",
+                    ".xlsx",
+                    ".xls",
+                    ".json",
+                    ".parquet",
+                    ".txt",
+                    ".tsv",
+                    ".ods",
+                    ".pcap",
+                    ".pcapng",
+                    ".cap",
+                ]
+            )
         ]
 
     else:
@@ -492,7 +493,8 @@ with source_tab1:
     if not supported_files:
 
         st.info(
-            "No repository datasets were found in the data folder."
+            "No repository datasets were found "
+            "in the data folder."
         )
 
     else:
@@ -512,7 +514,9 @@ with source_tab1:
             key="repository_dataset_selector",
         )
 
-        selected_path = data_folder / selected_dataset
+        selected_path = (
+            data_folder / selected_dataset
+        )
 
         if st.button(
             "📂 Load Selected Dataset",
@@ -523,32 +527,19 @@ with source_tab1:
 
             try:
 
-                # Repository files are loaded using the same
-                # universal loader used for uploaded files.
-
-                class LocalUploadedFile:
-
-                    def __init__(self, path):
-
-                        self.name = path.name
-
-                        with open(path, "rb") as file:
-                            self._bytes = file.read()
-
-                    def getvalue(self):
-
-                        return self._bytes
-
-
                 local_file = LocalUploadedFile(
                     selected_path
                 )
 
-                df, detected_type = load_dataset(
-                    local_file
-                )
+                with st.spinner(
+                    "Loading dataset..."
+                ):
 
-                info = get_dataset_info(df)
+                    df, detected_type = load_dataset(
+                        local_file
+                    )
+
+                    info = get_dataset_info(df)
 
                 st.session_state.active_dataframe = df
 
@@ -562,8 +553,13 @@ with source_tab1:
 
                 st.session_state.dataset_info = info
 
+                st.session_state.capture_metadata = (
+                    info.get("capture_metadata")
+                )
+
                 st.success(
-                    f"✓ {selected_dataset} loaded successfully."
+                    f"✓ {selected_dataset} "
+                    "loaded successfully."
                 )
 
                 st.rerun()
@@ -571,8 +567,10 @@ with source_tab1:
             except Exception as exc:
 
                 st.error(
-                    f"Unable to load dataset: {exc}"
+                    "Unable to load dataset."
                 )
+
+                st.exception(exc)
 
 
 # ============================================================
@@ -585,13 +583,30 @@ with source_tab2:
         """
         <div class="info-box">
 
-        <b>Universal Dataset Upload</b><br>
+        <b>Universal Dataset Upload</b>
 
-        Upload CSV, Excel, JSON, Parquet, TXT, TSV or
-        OpenDocument spreadsheet files.
+        <br><br>
 
-        InsightAI will automatically detect the format
-        after upload.
+        InsightAI automatically detects and processes:
+
+        <br><br>
+
+        📄 CSV &nbsp;&nbsp;
+        📊 Excel &nbsp;&nbsp;
+        🧾 JSON &nbsp;&nbsp;
+        🗂️ Parquet &nbsp;&nbsp;
+        📝 TXT / TSV &nbsp;&nbsp;
+        📑 ODS
+
+        <br><br>
+
+        🌐 <b>Wireshark:</b>
+        PCAP / PCAPNG / CAP
+
+        <br><br>
+
+        After upload, InsightAI automatically creates a
+        standardized dataset for analysis.
 
         </div>
         """,
@@ -600,17 +615,8 @@ with source_tab2:
 
 
     uploaded_file = st.file_uploader(
-        "Choose a dataset",
-        type=[
-            "csv",
-            "xlsx",
-            "xls",
-            "json",
-            "parquet",
-            "txt",
-            "tsv",
-            "ods",
-        ],
+        "Choose a dataset or Wireshark capture",
+        type=SUPPORTED_UPLOAD_TYPES,
         key="universal_dataset_upload",
     )
 
@@ -627,11 +633,10 @@ with source_tab2:
             f"Size: **{file_size_mb:.2f} MB**"
         )
 
-
         try:
 
             with st.spinner(
-                "Detecting file type and loading dataset..."
+                "Detecting file type and loading data..."
             ):
 
                 df, detected_type = load_dataset(
@@ -657,18 +662,96 @@ with source_tab2:
 
             st.session_state.dataset_info = info
 
+            st.session_state.capture_metadata = (
+                info.get("capture_metadata")
+            )
+
+
+            # ------------------------------------------------
+            # SUCCESS MESSAGE
+            # ------------------------------------------------
 
             st.success(
-                f"✓ File detected as **{detected_type}** "
+                f"✓ **{detected_type}** detected "
                 "and loaded successfully."
             )
 
 
             # ------------------------------------------------
-            # DATASET METRICS
+            # WIRESHARK INFORMATION
             # ------------------------------------------------
 
-            st.markdown("### Dataset Summary")
+            if (
+                detected_type.startswith(
+                    "Wireshark"
+                )
+                and info.get(
+                    "capture_metadata"
+                )
+            ):
+
+                capture = info[
+                    "capture_metadata"
+                ]
+
+                st.markdown(
+                    "### 🌐 Wireshark Capture Summary"
+                )
+
+                wc1, wc2, wc3, wc4 = st.columns(4)
+
+                wc1.metric(
+                    "Packets Loaded",
+                    f"{capture['packets_loaded']:,}",
+                )
+
+                wc2.metric(
+                    "Total Bytes",
+                    f"{capture['total_bytes']:,}",
+                )
+
+                wc3.metric(
+                    "Duration",
+                    f"{capture['duration_seconds']:.2f} sec",
+                )
+
+                wc4.metric(
+                    "Packets / Sec",
+                    f"{capture['packets_per_second']:,.2f}",
+                )
+
+
+                bytes_per_second = capture[
+                    "bytes_per_second"
+                ]
+
+                st.info(
+                    f"Average throughput: "
+                    f"**{bytes_per_second / (1024 * 1024):,.2f} MB/s**"
+                )
+
+
+                if (
+                    capture["packets_loaded"]
+                    >= capture["max_packets"]
+                ):
+
+                    st.warning(
+                        f"The capture contains more packets "
+                        f"than the current processing limit of "
+                        f"{capture['max_packets']:,}. "
+                        "Only the first packets were loaded "
+                        "into the analytics engine."
+                    )
+
+
+            # ------------------------------------------------
+            # DATASET SUMMARY
+            # ------------------------------------------------
+
+            st.markdown(
+                "### 📊 Dataset Summary"
+            )
 
             c1, c2, c3, c4 = st.columns(4)
 
@@ -694,7 +777,7 @@ with source_tab2:
 
 
             # ------------------------------------------------
-            # DETECTED TYPES
+            # AUTOMATIC DATA TYPE DETECTION
             # ------------------------------------------------
 
             st.markdown(
@@ -706,45 +789,55 @@ with source_tab2:
             type_cols[0].metric(
                 "🔢 Numeric",
                 len(
-                    info["column_types"]["numeric"]
+                    info["column_types"][
+                        "numeric"
+                    ]
                 ),
             )
 
             type_cols[1].metric(
                 "🔤 Categorical",
                 len(
-                    info["column_types"]["categorical"]
+                    info["column_types"][
+                        "categorical"
+                    ]
                 ),
             )
 
             type_cols[2].metric(
                 "📅 Date / Time",
                 len(
-                    info["column_types"]["datetime"]
+                    info["column_types"][
+                        "datetime"
+                    ]
                 ),
             )
 
             type_cols[3].metric(
                 "🔘 Boolean",
                 len(
-                    info["column_types"]["boolean"]
+                    info["column_types"][
+                        "boolean"
+                    ]
                 ),
             )
 
             type_cols[4].metric(
                 "📝 Text",
                 len(
-                    info["column_types"]["text"]
+                    info["column_types"][
+                        "text"
+                    ]
                 ),
             )
 
 
             # ------------------------------------------------
-            # DETECTED COLUMNS
+            # COLUMN CLASSIFICATION
             # ------------------------------------------------
 
             with st.expander(
-                "View detected column classifications"
+                "🔍 View detected column classifications"
             ):
 
                 detected_types_df = pd.DataFrame(
@@ -756,43 +849,58 @@ with source_tab2:
                             "Boolean",
                             "Text",
                         ],
+
                         "Columns": [
                             ", ".join(
                                 map(
                                     str,
-                                    info["column_types"][
+                                    info[
+                                        "column_types"
+                                    ][
                                         "numeric"
                                     ],
                                 )
                             ),
+
                             ", ".join(
                                 map(
                                     str,
-                                    info["column_types"][
+                                    info[
+                                        "column_types"
+                                    ][
                                         "categorical"
                                     ],
                                 )
                             ),
+
                             ", ".join(
                                 map(
                                     str,
-                                    info["column_types"][
+                                    info[
+                                        "column_types"
+                                    ][
                                         "datetime"
                                     ],
                                 )
                             ),
+
                             ", ".join(
                                 map(
                                     str,
-                                    info["column_types"][
+                                    info[
+                                        "column_types"
+                                    ][
                                         "boolean"
                                     ],
                                 )
                             ),
+
                             ", ".join(
                                 map(
                                     str,
-                                    info["column_types"][
+                                    info[
+                                        "column_types"
+                                    ][
                                         "text"
                                     ],
                                 )
@@ -809,7 +917,7 @@ with source_tab2:
 
 
             # ------------------------------------------------
-            # PREVIEW
+            # DATA PREVIEW
             # ------------------------------------------------
 
             st.markdown(
@@ -826,7 +934,7 @@ with source_tab2:
         except Exception as exc:
 
             st.error(
-                f"❌ Unable to load this file."
+                "❌ Unable to load this file."
             )
 
             st.exception(exc)
@@ -838,16 +946,32 @@ with source_tab2:
 
 if st.session_state.active_dataframe is not None:
 
-    active_df = st.session_state.active_dataframe
+    active_df = (
+        st.session_state.active_dataframe
+    )
 
     info = st.session_state.dataset_info
 
+
+    if info is None:
+
+        info = get_dataset_info(
+            active_df
+        )
+
+        st.session_state.dataset_info = info
+
+
     st.divider()
 
+
     st.markdown(
-        '<div class="section-title">📌 Active Dataset</div>',
+        '<div class="section-title">'
+        '📌 Active Dataset'
+        '</div>',
         unsafe_allow_html=True,
     )
+
 
     st.markdown(
         f"""
@@ -881,13 +1005,6 @@ if st.session_state.active_dataframe is not None:
     # --------------------------------------------------------
     # ACTIVE DATASET METRICS
     # --------------------------------------------------------
-
-    if info is None:
-
-        info = get_dataset_info(active_df)
-
-        st.session_state.dataset_info = info
-
 
     metric_cols = st.columns(6)
 
@@ -942,13 +1059,15 @@ if st.session_state.active_dataframe is not None:
 
 
 # ============================================================
-# REPOSITORY SUMMARY
+# REPOSITORY DATASET SUMMARY
 # ============================================================
 
 st.divider()
 
 st.markdown(
-    '<div class="section-title">📚 Repository Datasets</div>',
+    '<div class="section-title">'
+    '📚 Repository Datasets'
+    '</div>',
     unsafe_allow_html=True,
 )
 
@@ -964,27 +1083,19 @@ if supported_files:
 
     summary_data = []
 
+
     for file in supported_files:
 
         try:
 
-            class LocalFile:
+            local_file = LocalUploadedFile(
+                file
+            )
 
-                def __init__(self, path):
-
-                    self.name = path.name
-
-                    with open(path, "rb") as f:
-                        self._bytes = f.read()
-
-                def getvalue(self):
-                    return self._bytes
-
-
-            local_file = LocalFile(file)
-
-            temp_df, temp_type = load_dataset(
-                local_file
+            temp_df, temp_type = (
+                load_dataset(
+                    local_file
+                )
             )
 
             summary_data.append(
@@ -992,11 +1103,13 @@ if supported_files:
                     "Dataset": file.name,
                     "Type": temp_type,
                     "Rows": len(temp_df),
-                    "Columns": len(temp_df.columns),
+                    "Columns": len(
+                        temp_df.columns
+                    ),
                 }
             )
 
-        except Exception:
+        except Exception as exc:
 
             summary_data.append(
                 {
@@ -1011,6 +1124,7 @@ if supported_files:
     summary_df = pd.DataFrame(
         summary_data
     )
+
 
     st.dataframe(
         summary_df,
