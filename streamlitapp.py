@@ -43,6 +43,7 @@ if "active_source" not in st.session_state:
 # =========================================================
 
 def get_repository_datasets():
+
     if not DATA_DIR.exists():
         return []
 
@@ -86,11 +87,13 @@ def load_uploaded_file(
     suffix = Path(file_name).suffix.lower()
 
     if suffix == ".csv":
+
         return pd.read_csv(
             BytesIO(file_bytes)
         )
 
     if suffix in [".xlsx", ".xls"]:
+
         return pd.read_excel(
             BytesIO(file_bytes)
         )
@@ -633,35 +636,19 @@ if st.session_state.active_dataframe is not None:
     st.write("")
 
     # -----------------------------------------------------
-    # ACTIVE DATASET ACTIONS
+    # MAIN DATA PREPARATION ACTION
     # -----------------------------------------------------
 
-    col_clean, col_explore = st.columns(2)
+    if st.button(
+        "🧹 Open Data Cleaning",
+        type="primary",
+        use_container_width=True,
+        key="open_data_cleaning",
+    ):
 
-    with col_clean:
-
-        if st.button(
-            "🧹 Open Data Cleaning",
-            type="primary",
-            use_container_width=True,
-            key="open_data_cleaning",
-        ):
-
-            st.switch_page(
-                "pages/00_Data_Cleaning.py"
-            )
-
-    with col_explore:
-
-        if st.button(
-            "📊 Open Data Explorer",
-            use_container_width=True,
-            key="open_data_explorer",
-        ):
-
-            st.switch_page(
-                "pages/01_Data_Explorer.py"
-            )
+        st.switch_page(
+            "pages/00_Data_Cleaning.py"
+        )
 
 else:
 
