@@ -1,0 +1,6 @@
+.block-container {padding-top: 2rem; padding-bottom: 3rem; max-width: 1500px;}
+.hero {padding: 2rem 2.2rem; border: 1px solid rgba(128,128,128,.25); border-radius: 22px; margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(70,80,120,.18), rgba(20,120,140,.10));}
+.hero h1 {font-size: 3.2rem; margin: .1rem 0 .3rem 0; letter-spacing: -.04em;}
+.hero p {font-size: 1.05rem; opacity: .78; margin: 0;}
+.eyebrow {font-size: .72rem; letter-spacing: .18em; font-weight: 700; opacity: .65;}
+[data-testid="stMetric"] {border: 1px solid rgba(128,128,128,.22); padding: 1rem; border-radius: 16px;}
