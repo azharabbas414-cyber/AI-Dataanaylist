@@ -1,5 +1,6 @@
 import streamlit as st
 from pathlib import Path
+from io import BytesIO
 import pandas as pd
 
 
@@ -11,7 +12,7 @@ st.set_page_config(
     page_title="InsightAI",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 
@@ -42,6 +43,7 @@ if "active_source" not in st.session_state:
 # =========================================================
 
 def get_repository_datasets():
+    """Find CSV and Excel files in the repository data folder."""
 
     if not DATA_DIR.exists():
         return []
@@ -58,11 +60,12 @@ repository_datasets = get_repository_datasets()
 
 
 # =========================================================
-# LOAD DATASET
+# LOAD REPOSITORY DATASET
 # =========================================================
 
 @st.cache_data
-def load_file(file_path):
+def load_repository_file(file_path):
+    """Load a CSV or Excel file from the repository."""
 
     suffix = file_path.suffix.lower()
 
@@ -72,33 +75,26 @@ def load_file(file_path):
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
 
-    raise ValueError(
-        "Unsupported file format."
-    )
+    raise ValueError("Unsupported file format.")
 
+
+# =========================================================
+# LOAD UPLOADED DATASET
+# =========================================================
 
 @st.cache_data
 def load_uploaded_file(file_bytes, file_name):
+    """Load an uploaded CSV or Excel file."""
 
     suffix = Path(file_name).suffix.lower()
 
-    from io import BytesIO
-
     if suffix == ".csv":
-
-        return pd.read_csv(
-            BytesIO(file_bytes)
-        )
+        return pd.read_csv(BytesIO(file_bytes))
 
     if suffix in [".xlsx", ".xls"]:
+        return pd.read_excel(BytesIO(file_bytes))
 
-        return pd.read_excel(
-            BytesIO(file_bytes)
-        )
-
-    raise ValueError(
-        "Unsupported file format."
-    )
+    raise ValueError("Unsupported file format.")
 
 
 # =========================================================
@@ -107,70 +103,114 @@ def load_uploaded_file(file_bytes, file_name):
 
 st.markdown(
     """
-    <style>
+<style>
 
-    .hero {
-        padding: 35px;
-        border-radius: 18px;
-        background: linear-gradient(
-            135deg,
-            #eef2f7,
-            #dfe7ef
-        );
-        border: 1px solid #cbd5e1;
-        margin-bottom: 30px;
-    }
+.main {
+    padding-top: 1rem;
+}
 
-    .hero-small {
-        color: #64748b;
-        font-size: 13px;
-        font-weight: 700;
-        letter-spacing: 3px;
-    }
+/* Hero */
 
-    .hero-title {
-        font-size: 52px;
-        font-weight: 800;
-        margin: 12px 0;
-        color: #1e293b;
-    }
+.hero {
+    padding: 42px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #eef2f7, #dfe7ef);
+    border: 1px solid #cbd5e1;
+    margin-bottom: 30px;
+}
 
-    .hero-text {
-        font-size: 18px;
-        color: #64748b;
-    }
+.hero-small {
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+}
 
-    .dataset-card {
-        padding: 20px;
-        border-radius: 14px;
-        border: 1px solid #e2e8f0;
-        background: #ffffff;
-        min-height: 120px;
-        margin-bottom: 15px;
-    }
+.hero-title {
+    font-size: 52px;
+    font-weight: 800;
+    margin: 10px 0;
+    color: #1e293b;
+}
 
-    .dataset-name {
-        font-size: 17px;
-        font-weight: 700;
-        color: #1e293b;
-    }
+.hero-text {
+    font-size: 18px;
+    color: #64748b;
+    max-width: 850px;
+}
 
-    .dataset-type {
-        color: #64748b;
-        font-size: 13px;
-        margin-top: 8px;
-    }
 
-    .source-card {
-        padding: 25px;
-        border-radius: 16px;
-        border: 1px solid #e2e8f0;
-        background: #ffffff;
-    }
+/* Source cards */
 
-    </style>
-    """,
-    unsafe_allow_html=True
+.source-card {
+    padding: 24px;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    min-height: 180px;
+}
+
+.source-icon {
+    font-size: 30px;
+}
+
+.source-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-top: 8px;
+}
+
+.source-description {
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+
+/* Dataset cards */
+
+.dataset-card {
+    padding: 18px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    min-height: 110px;
+    margin-bottom: 15px;
+}
+
+.dataset-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.dataset-type {
+    color: #64748b;
+    font-size: 12px;
+    margin-top: 7px;
+}
+
+
+/* Active dataset */
+
+.active-card {
+    padding: 20px;
+    border-radius: 14px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+}
+
+
+/* Sidebar */
+
+section[data-testid="stSidebar"] {
+    background-color: #f8fafc;
+}
+
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
 
@@ -182,9 +222,7 @@ with st.sidebar:
 
     st.markdown("## ✦ InsightAI")
 
-    st.caption(
-        "AI-Powered Data Analytics Platform"
-    )
+    st.caption("AI-Powered Data Analytics Platform")
 
     st.divider()
 
@@ -192,57 +230,55 @@ with st.sidebar:
 
     st.page_link(
         "streamlitapp.py",
-        label="🏠 Home"
+        label="🏠 Home",
     )
 
     st.page_link(
         "pages/01_Data_Explorer.py",
-        label="📊 Data Explorer"
+        label="📊 Data Explorer",
     )
 
     st.page_link(
         "pages/02_Dashboard.py",
-        label="📈 Dashboard"
+        label="📈 Dashboard",
     )
 
     st.page_link(
         "pages/03_AI_Analyst.py",
-        label="🤖 AI Analyst"
+        label="🤖 AI Analyst",
     )
 
     st.page_link(
         "pages/04_Anomaly_Detection.py",
-        label="🚨 Anomaly Detection"
+        label="🚨 Anomaly Detection",
     )
 
     st.page_link(
         "pages/05_Forecasting.py",
-        label="🔮 Forecasting"
+        label="🔮 Forecasting",
     )
 
     st.page_link(
         "pages/06_Reports.py",
-        label="📄 Reports"
+        label="📄 Reports",
     )
 
     st.divider()
 
     st.metric(
         "Repository Datasets",
-        len(repository_datasets)
+        len(repository_datasets),
     )
 
     if st.session_state.active_dataset:
 
-        st.caption(
+        st.success(
             f"Active: {st.session_state.active_dataset}"
         )
 
     else:
 
-        st.caption(
-            "No dataset selected"
-        )
+        st.caption("No active dataset")
 
 
 # =========================================================
@@ -251,29 +287,27 @@ with st.sidebar:
 
 st.markdown(
     """
-    <div class="hero">
-
-        <div class="hero-small">
-            INTELLIGENT DATA ANALYTICS
-        </div>
-
-        <div class="hero-title">
-            InsightAI
-        </div>
-
-        <div class="hero-text">
-            Transform raw data into interactive analytics,
-            intelligent insights and decision-ready information.
-        </div>
-
+<div class="hero">
+    <div class="hero-small">
+        INTELLIGENT DATA ANALYTICS
     </div>
-    """,
-    unsafe_allow_html=True
+
+    <div class="hero-title">
+        InsightAI
+    </div>
+
+    <div class="hero-text">
+        Transform raw data into interactive analytics,
+        intelligent insights and decision-ready information.
+    </div>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# WORKFLOW
+# PLATFORM WORKFLOW
 # =========================================================
 
 st.markdown("## How InsightAI Works")
@@ -282,35 +316,29 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
 
-    st.markdown(
-        """
-        ### 01 · Select
+    st.markdown("### 01 · Select")
 
-        Choose an existing dataset from the repository
-        or upload a new CSV/Excel file.
-        """
+    st.write(
+        "Choose an existing dataset from the repository "
+        "or upload a new CSV/Excel file."
     )
 
 with col2:
 
-    st.markdown(
-        """
-        ### 02 · Explore
+    st.markdown("### 02 · Explore")
 
-        Profile the data, inspect quality,
-        statistics, relationships and trends.
-        """
+    st.write(
+        "Profile the data, inspect quality, statistics, "
+        "relationships and trends."
     )
 
 with col3:
 
-    st.markdown(
-        """
-        ### 03 · Analyze
+    st.markdown("### 03 · Analyze")
 
-        Use dashboards, anomaly detection,
-        forecasting and AI-powered analysis.
-        """
+    st.write(
+        "Use dashboards, anomaly detection, forecasting "
+        "and AI-powered analysis."
     )
 
 
@@ -318,33 +346,30 @@ st.divider()
 
 
 # =========================================================
-# DATA SOURCE SELECTION
+# DATA SOURCE
 # =========================================================
 
-st.markdown("## 📂 Choose Your Data Source")
+st.markdown("## Choose Your Data Source")
 
-
-source_tab, upload_tab = st.tabs(
+existing_tab, upload_tab = st.tabs(
     [
         "📁 Existing GitHub Datasets",
-        "⬆️ Upload New Dataset"
+        "⬆️ Upload New Dataset",
     ]
 )
 
 
 # =========================================================
-# EXISTING DATASET
+# EXISTING GITHUB DATASETS
 # =========================================================
 
-with source_tab:
+with existing_tab:
 
-    st.markdown(
-        "### Repository Datasets"
-    )
+    st.markdown("### Repository Datasets")
 
     st.caption(
         "These datasets are already stored in the GitHub "
-        "`data/` folder and do not need to be uploaded again."
+        "`data/` folder."
     )
 
     if not repository_datasets:
@@ -357,13 +382,13 @@ with source_tab:
     else:
 
         dataset_names = [
-            file.name
-            for file in repository_datasets
+            file.name for file in repository_datasets
         ]
 
         selected_name = st.selectbox(
             "Select a dataset",
-            dataset_names
+            dataset_names,
+            key="repository_dataset_selector",
         )
 
         selected_file = DATA_DIR / selected_name
@@ -371,12 +396,13 @@ with source_tab:
         if st.button(
             "📊 Use This Dataset",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
+            key="use_repository_dataset",
         ):
 
             try:
 
-                dataframe = load_file(
+                dataframe = load_repository_file(
                     selected_file
                 )
 
@@ -396,10 +422,6 @@ with source_tab:
                     f"{selected_name} loaded successfully."
                 )
 
-                st.info(
-                    "Your dataset is now active across InsightAI."
-                )
-
             except Exception as error:
 
                 st.error(
@@ -413,23 +435,18 @@ with source_tab:
 
 with upload_tab:
 
-    st.markdown(
-        "### Upload a New Dataset"
-    )
+    st.markdown("### Upload a New Dataset")
 
     st.caption(
-        "Upload a CSV or Excel file when you want "
-        "to analyze a dataset that is not stored in GitHub."
+        "Use this option when you want to analyze a "
+        "dataset that is not stored in GitHub."
     )
 
     uploaded_file = st.file_uploader(
-        "Choose a CSV or Excel file",
-        type=[
-            "csv",
-            "xlsx",
-            "xls"
-        ],
-        accept_multiple_files=False
+        "Choose CSV or Excel file",
+        type=["csv", "xlsx", "xls"],
+        accept_multiple_files=False,
+        key="new_dataset_uploader",
     )
 
     if uploaded_file is not None:
@@ -440,7 +457,7 @@ with upload_tab:
 
             dataframe = load_uploaded_file(
                 file_bytes,
-                uploaded_file.name
+                uploaded_file.name,
             )
 
             st.session_state.active_dataset = (
@@ -459,11 +476,6 @@ with upload_tab:
                 f"{uploaded_file.name} loaded successfully."
             )
 
-            st.info(
-                "The uploaded dataset is now active "
-                "for this session."
-            )
-
         except Exception as error:
 
             st.error(
@@ -479,51 +491,31 @@ st.divider()
 
 st.markdown("## 🎯 Active Dataset")
 
-
 if st.session_state.active_dataframe is not None:
 
-    active_df = (
-        st.session_state.active_dataframe
+    active_df = st.session_state.active_dataframe
+
+    st.markdown(
+        f"""
+<div class="active-card">
+
+<b>Dataset:</b> {st.session_state.active_dataset}<br>
+<b>Source:</b> {st.session_state.active_source}<br>
+<b>Rows:</b> {len(active_df):,}<br>
+<b>Columns:</b> {len(active_df.columns):,}
+
+</div>
+""",
+        unsafe_allow_html=True,
     )
 
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-
-        st.metric(
-            "Dataset",
-            st.session_state.active_dataset
-        )
-
-    with col2:
-
-        st.metric(
-            "Rows",
-            f"{len(active_df):,}"
-        )
-
-    with col3:
-
-        st.metric(
-            "Columns",
-            f"{len(active_df.columns):,}"
-        )
-
-    with col4:
-
-        st.metric(
-            "Source",
-            st.session_state.active_source
-        )
-
-    st.success(
-        "✅ Dataset is ready for analysis."
-    )
+    st.write("")
 
     if st.button(
         "📊 Open Data Explorer",
         type="primary",
-        use_container_width=True
+        use_container_width=True,
+        key="open_data_explorer",
     ):
 
         st.switch_page(
@@ -533,13 +525,13 @@ if st.session_state.active_dataframe is not None:
 else:
 
     st.info(
-        "Select an existing dataset or upload a new dataset "
-        "to begin analysis."
+        "Select an existing dataset or upload a new "
+        "dataset to begin analysis."
     )
 
 
 # =========================================================
-# AVAILABLE DATASETS SUMMARY
+# REPOSITORY DATASET SUMMARY
 # =========================================================
 
 st.divider()
@@ -550,9 +542,7 @@ if repository_datasets:
 
     cols = st.columns(3)
 
-    for index, dataset in enumerate(
-        repository_datasets
-    ):
+    for index, dataset in enumerate(repository_datasets):
 
         with cols[index % 3]:
 
@@ -562,20 +552,20 @@ if repository_datasets:
 
             st.markdown(
                 f"""
-                <div class="dataset-card">
+<div class="dataset-card">
 
-                    <div class="dataset-name">
-                        📄 {dataset.stem}
-                    </div>
+    <div class="dataset-name">
+        📄 {dataset.stem}
+    </div>
 
-                    <div class="dataset-type">
-                        {dataset.suffix.upper()[1:]}
-                        • {size_kb:.1f} KB
-                    </div>
+    <div class="dataset-type">
+        {dataset.suffix.upper()[1:]}
+        • {size_kb:.1f} KB
+    </div>
 
-                </div>
-                """,
-                unsafe_allow_html=True
+</div>
+""",
+                unsafe_allow_html=True,
             )
 
 
