@@ -1,24 +1,7 @@
-```text
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environment
-venv/
 .venv/
-env/
-
-# Secrets
-.streamlit/secrets.toml
-
-# Environment files
+venv/
 .env
-
-# Jupyter
-.ipynb_checkpoints/
-
-# OS
+.streamlit/secrets.toml
 .DS_Store
-Thumbs.db
-```
