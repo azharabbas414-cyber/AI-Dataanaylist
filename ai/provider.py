@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from groq import Groq
+from openai import OpenAI
 
 
 class AIProvider:
@@ -36,28 +36,17 @@ class GroqProvider(AIProvider):
         if not self.is_available():
             raise RuntimeError("GROQ_API_KEY is not configured.")
 
-        client = Groq(api_key=self.api_key)
-
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are InsightAI, an expert data analyst. "
-                        "Answer using the analytical evidence provided. "
-                        "Do not invent statistics."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0.2,
+        client = OpenAI(
+            api_key=self.api_key,
+            base_url="https://api.groq.com/openai/v1",
         )
 
-        return response.choices[0].message.content
+        response = client.responses.create(
+            model=self.model,
+            input=prompt,
+        )
+
+        return response.output_text
 
 
 def get_ai_provider():
