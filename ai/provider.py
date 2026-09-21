@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+from groq import Groq
 
 
 class AIProvider:
@@ -10,12 +11,12 @@ class AIProvider:
         raise NotImplementedError
 
 
-class GrokProvider(AIProvider):
+class GroqProvider(AIProvider):
     def __init__(self):
-        self.api_key = self._get_secret("GROK_API_KEY")
+        self.api_key = self._get_secret("GROQ_API_KEY")
         self.model = self._get_secret(
-            "GROK_MODEL",
-            "grok-4-1-fast-non-reasoning"
+            "GROQ_MODEL",
+            "llama-3.3-70b-versatile"
         )
 
     def _get_secret(self, key, default=None):
@@ -33,27 +34,31 @@ class GrokProvider(AIProvider):
 
     def analyze(self, prompt):
         if not self.is_available():
-            raise RuntimeError("GROK_API_KEY is not configured.")
+            raise RuntimeError("GROQ_API_KEY is not configured.")
 
-        from openai import OpenAI
+        client = Groq(api_key=self.api_key)
 
-        client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://api.x.ai/v1",
-        )
-
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=self.model,
-            input=prompt,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are InsightAI, an expert data analyst. "
+                        "Answer using the analytical evidence provided. "
+                        "Do not invent statistics."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=0.2,
         )
 
-        return response.output_text
+        return response.choices[0].message.content
 
 
 def get_ai_provider():
-    provider_name = "grok"
-
-    if provider_name == "grok":
-        return GrokProvider()
-
-    return None
+    return GroqProvider()
