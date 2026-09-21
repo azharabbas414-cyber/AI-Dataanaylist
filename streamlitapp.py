@@ -39,169 +39,6 @@ if "capture_metadata" not in st.session_state:
 
 
 # ============================================================
-# CUSTOM CSS
-# ============================================================
-
-st.markdown(
-    """
-    <style>
-
-    .main {
-        padding-top: 1rem;
-    }
-
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1500px;
-    }
-
-    /* SIDEBAR */
-
-    section[data-testid="stSidebar"] {
-        border-right: 1px solid rgba(128, 128, 128, 0.18);
-    }
-
-    .sidebar-brand {
-        text-align: center;
-        padding: 10px 0 20px 0;
-    }
-
-    .sidebar-brand-title {
-        font-size: 26px;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-    }
-
-    .sidebar-brand-subtitle {
-        font-size: 12px;
-        opacity: 0.65;
-        margin-top: -4px;
-    }
-
-    /* HERO */
-
-    .hero {
-        padding: 35px 38px;
-        border-radius: 20px;
-        margin-bottom: 28px;
-        background:
-            linear-gradient(
-                135deg,
-                rgba(80, 70, 229, 0.14),
-                rgba(30, 144, 255, 0.08)
-            );
-        border: 1px solid rgba(128, 128, 128, 0.18);
-    }
-
-    .hero-title {
-        font-size: 44px;
-        font-weight: 850;
-        letter-spacing: -1.5px;
-        margin-bottom: 8px;
-    }
-
-    .hero-subtitle {
-        font-size: 18px;
-        opacity: 0.72;
-        max-width: 850px;
-        line-height: 1.6;
-    }
-
-    /* WORKFLOW */
-
-    .workflow-card {
-        padding: 22px;
-        min-height: 155px;
-        border-radius: 16px;
-        border: 1px solid rgba(128, 128, 128, 0.18);
-        background: rgba(128, 128, 128, 0.035);
-    }
-
-    .workflow-icon {
-        font-size: 28px;
-        margin-bottom: 10px;
-    }
-
-    .workflow-title {
-        font-size: 18px;
-        font-weight: 750;
-        margin-bottom: 5px;
-    }
-
-    .workflow-text {
-        font-size: 13px;
-        opacity: 0.68;
-        line-height: 1.5;
-    }
-
-    /* SECTION */
-
-    .section-title {
-        font-size: 25px;
-        font-weight: 800;
-        margin-top: 25px;
-        margin-bottom: 6px;
-    }
-
-    .section-subtitle {
-        font-size: 14px;
-        opacity: 0.65;
-        margin-bottom: 18px;
-    }
-
-    /* ACTIVE DATASET */
-
-    .active-card {
-        padding: 24px;
-        border-radius: 18px;
-        border: 1px solid rgba(80, 70, 229, 0.28);
-        background:
-            linear-gradient(
-                135deg,
-                rgba(80, 70, 229, 0.09),
-                rgba(30, 144, 255, 0.04)
-            );
-        margin-bottom: 15px;
-    }
-
-    .active-title {
-        font-size: 20px;
-        font-weight: 800;
-        margin-bottom: 12px;
-    }
-
-    .active-value {
-        font-size: 14px;
-        margin-bottom: 5px;
-    }
-
-    /* INFO */
-
-    .info-box {
-        padding: 18px;
-        border-radius: 14px;
-        border: 1px solid rgba(128, 128, 128, 0.16);
-        background: rgba(128, 128, 128, 0.035);
-        margin: 10px 0;
-    }
-
-    /* FOOTER */
-
-    .footer {
-        text-align: center;
-        padding: 35px 0 10px 0;
-        opacity: 0.5;
-        font-size: 12px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
 # SUPPORTED FILE TYPES
 # ============================================================
 
@@ -221,14 +58,199 @@ SUPPORTED_UPLOAD_TYPES = [
 
 
 # ============================================================
+# CUSTOM CSS
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    .main {
+        padding-top: 1rem;
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 1500px;
+    }
+
+    /* ======================================================
+       SIDEBAR
+       ====================================================== */
+
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid rgba(128, 128, 128, 0.18);
+    }
+
+    /* ======================================================
+       HERO
+       ====================================================== */
+
+    .hero {
+        padding: 38px 42px;
+        border-radius: 22px;
+        margin-bottom: 30px;
+        background:
+            linear-gradient(
+                135deg,
+                rgba(80, 70, 229, 0.14),
+                rgba(30, 144, 255, 0.08)
+            );
+        border: 1px solid rgba(128, 128, 128, 0.18);
+    }
+
+    .hero-title {
+        font-size: 44px;
+        font-weight: 850;
+        letter-spacing: -1.5px;
+        line-height: 1.15;
+        margin-bottom: 12px;
+    }
+
+    .hero-subtitle {
+        font-size: 18px;
+        opacity: 0.72;
+        max-width: 900px;
+        line-height: 1.6;
+    }
+
+    /* ======================================================
+       SIDEBAR BRAND
+       ====================================================== */
+
+    .sidebar-brand {
+        text-align: center;
+        padding: 8px 0 18px 0;
+    }
+
+    .sidebar-brand-title {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+    }
+
+    .sidebar-brand-subtitle {
+        font-size: 12px;
+        opacity: 0.65;
+        margin-top: 4px;
+    }
+
+    /* ======================================================
+       WORKFLOW CARDS
+       ====================================================== */
+
+    .workflow-card {
+        padding: 24px;
+        min-height: 165px;
+        border-radius: 18px;
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        background: rgba(128, 128, 128, 0.035);
+    }
+
+    .workflow-icon {
+        font-size: 30px;
+        margin-bottom: 12px;
+    }
+
+    .workflow-title {
+        font-size: 18px;
+        font-weight: 750;
+        margin-bottom: 8px;
+    }
+
+    .workflow-text {
+        font-size: 13px;
+        opacity: 0.68;
+        line-height: 1.55;
+    }
+
+    /* ======================================================
+       SECTION
+       ====================================================== */
+
+    .section-title {
+        font-size: 25px;
+        font-weight: 800;
+        margin-top: 25px;
+        margin-bottom: 6px;
+    }
+
+    .section-subtitle {
+        font-size: 14px;
+        opacity: 0.65;
+        margin-bottom: 18px;
+    }
+
+    /* ======================================================
+       ACTIVE DATASET
+       ====================================================== */
+
+    .active-card {
+        padding: 24px;
+        border-radius: 18px;
+        border: 1px solid rgba(80, 70, 229, 0.28);
+        background:
+            linear-gradient(
+                135deg,
+                rgba(80, 70, 229, 0.09),
+                rgba(30, 144, 255, 0.04)
+            );
+        margin-bottom: 15px;
+    }
+
+    .active-title {
+        font-size: 21px;
+        font-weight: 800;
+        margin-bottom: 12px;
+        word-break: break-word;
+    }
+
+    .active-value {
+        font-size: 14px;
+        margin-bottom: 5px;
+    }
+
+    /* ======================================================
+       INFO BOX
+       ====================================================== */
+
+    .info-box {
+        padding: 20px;
+        border-radius: 16px;
+        border: 1px solid rgba(128, 128, 128, 0.16);
+        background: rgba(128, 128, 128, 0.035);
+        margin: 10px 0 20px 0;
+        line-height: 1.7;
+    }
+
+    /* ======================================================
+       FOOTER
+       ====================================================== */
+
+    .footer {
+        text-align: center;
+        padding: 40px 0 10px 0;
+        opacity: 0.5;
+        font-size: 12px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
 with st.sidebar:
 
-    st.markdown(
+    st.html(
         """
         <div class="sidebar-brand">
+
             <div class="sidebar-brand-title">
                 🧠 InsightAI
             </div>
@@ -236,9 +258,9 @@ with st.sidebar:
             <div class="sidebar-brand-subtitle">
                 AI-Powered Data Intelligence
             </div>
+
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     st.divider()
@@ -311,7 +333,7 @@ with st.sidebar:
 # HERO
 # ============================================================
 
-st.markdown(
+st.html(
     """
     <div class="hero">
 
@@ -326,28 +348,30 @@ st.markdown(
         </div>
 
     </div>
-    """,
-    unsafe_allow_html=True,
+    """
 )
 
 
 # ============================================================
-# WORKFLOW
+# WORKFLOW HEADER
 # ============================================================
 
-st.markdown(
-    '<div class="section-title">'
-    'Your Analytics Workflow'
-    '</div>',
-    unsafe_allow_html=True,
+st.html(
+    """
+    <div class="section-title">
+        Your Analytics Workflow
+    </div>
+
+    <div class="section-subtitle">
+        From raw data to actionable insights.
+    </div>
+    """
 )
 
-st.markdown(
-    '<div class="section-subtitle">'
-    'From raw data to actionable insights.'
-    '</div>',
-    unsafe_allow_html=True,
-)
+
+# ============================================================
+# WORKFLOW CARDS
+# ============================================================
 
 workflow_cols = st.columns(4)
 
@@ -378,11 +402,12 @@ workflow = [
     ),
 ]
 
+
 for col, icon, title, description in workflow:
 
     with col:
 
-        st.markdown(
+        st.html(
             f"""
             <div class="workflow-card">
 
@@ -399,8 +424,7 @@ for col, icon, title, description in workflow:
                 </div>
 
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
 
 
@@ -408,24 +432,27 @@ st.write("")
 
 
 # ============================================================
-# DATA SOURCE
+# DATA SOURCE HEADER
 # ============================================================
 
-st.markdown(
-    '<div class="section-title">'
-    '📂 Select Your Data'
-    '</div>',
-    unsafe_allow_html=True,
+st.html(
+    """
+    <div class="section-title">
+        📂 Select Your Data
+    </div>
+
+    <div class="section-subtitle">
+        Upload a supported data file and InsightAI will
+        automatically detect the format and create a
+        dataset profile.
+    </div>
+    """
 )
 
-st.markdown(
-    '<div class="section-subtitle">'
-    'Upload a supported data file and InsightAI will automatically '
-    'detect the format and create a dataset profile.'
-    '</div>',
-    unsafe_allow_html=True,
-)
 
+# ============================================================
+# TABS
+# ============================================================
 
 source_tab1, source_tab2 = st.tabs(
     [
@@ -436,7 +463,7 @@ source_tab1, source_tab2 = st.tabs(
 
 
 # ============================================================
-# LOCAL REPOSITORY FILE CLASS
+# LOCAL FILE WRAPPER
 # ============================================================
 
 class LocalUploadedFile:
@@ -574,43 +601,42 @@ with source_tab1:
 
 
 # ============================================================
-# UNIVERSAL FILE UPLOAD
+# UNIVERSAL UPLOAD
 # ============================================================
 
 with source_tab2:
 
-    st.markdown(
+    st.html(
         """
         <div class="info-box">
 
-        <b>Universal Dataset Upload</b>
+            <b>Universal Dataset Upload</b>
 
-        <br><br>
+            <br><br>
 
-        InsightAI automatically detects and processes:
+            InsightAI automatically detects and processes:
 
-        <br><br>
+            <br><br>
 
-        📄 CSV &nbsp;&nbsp;
-        📊 Excel &nbsp;&nbsp;
-        🧾 JSON &nbsp;&nbsp;
-        🗂️ Parquet &nbsp;&nbsp;
-        📝 TXT / TSV &nbsp;&nbsp;
-        📑 ODS
+            📄 CSV &nbsp;&nbsp;
+            📊 Excel &nbsp;&nbsp;
+            🧾 JSON &nbsp;&nbsp;
+            🗂️ Parquet &nbsp;&nbsp;
+            📝 TXT / TSV &nbsp;&nbsp;
+            📑 ODS
 
-        <br><br>
+            <br><br>
 
-        🌐 <b>Wireshark:</b>
-        PCAP / PCAPNG / CAP
+            🌐 <b>Wireshark:</b>
+            PCAP / PCAPNG / CAP
 
-        <br><br>
+            <br><br>
 
-        After upload, InsightAI automatically creates a
-        standardized dataset for analysis.
+            After upload, InsightAI automatically creates
+            a standardized dataset for analysis.
 
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
@@ -668,7 +694,7 @@ with source_tab2:
 
 
             # ------------------------------------------------
-            # SUCCESS MESSAGE
+            # SUCCESS
             # ------------------------------------------------
 
             st.success(
@@ -678,7 +704,7 @@ with source_tab2:
 
 
             # ------------------------------------------------
-            # WIRESHARK INFORMATION
+            # PCAP SUMMARY
             # ------------------------------------------------
 
             if (
@@ -720,7 +746,6 @@ with source_tab2:
                     f"{capture['packets_per_second']:,.2f}",
                 )
 
-
                 bytes_per_second = capture[
                     "bytes_per_second"
                 ]
@@ -729,7 +754,6 @@ with source_tab2:
                     f"Average throughput: "
                     f"**{bytes_per_second / (1024 * 1024):,.2f} MB/s**"
                 )
-
 
                 if (
                     capture["packets_loaded"]
@@ -777,7 +801,7 @@ with source_tab2:
 
 
             # ------------------------------------------------
-            # AUTOMATIC DATA TYPE DETECTION
+            # DETECTED TYPES
             # ------------------------------------------------
 
             st.markdown(
@@ -965,15 +989,16 @@ if st.session_state.active_dataframe is not None:
     st.divider()
 
 
-    st.markdown(
-        '<div class="section-title">'
-        '📌 Active Dataset'
-        '</div>',
-        unsafe_allow_html=True,
+    st.html(
+        """
+        <div class="section-title">
+            📌 Active Dataset
+        </div>
+        """
     )
 
 
-    st.markdown(
+    st.html(
         f"""
         <div class="active-card">
 
@@ -997,8 +1022,7 @@ if st.session_state.active_dataframe is not None:
             </div>
 
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
@@ -1059,30 +1083,28 @@ if st.session_state.active_dataframe is not None:
 
 
 # ============================================================
-# REPOSITORY DATASET SUMMARY
+# REPOSITORY SUMMARY
 # ============================================================
 
 st.divider()
 
-st.markdown(
-    '<div class="section-title">'
-    '📚 Repository Datasets'
-    '</div>',
-    unsafe_allow_html=True,
-)
 
-st.markdown(
-    '<div class="section-subtitle">'
-    'Datasets currently available inside the InsightAI repository.'
-    '</div>',
-    unsafe_allow_html=True,
+st.html(
+    """
+    <div class="section-title">
+        📚 Repository Datasets
+    </div>
+
+    <div class="section-subtitle">
+        Datasets currently available inside the InsightAI repository.
+    </div>
+    """
 )
 
 
 if supported_files:
 
     summary_data = []
-
 
     for file in supported_files:
 
@@ -1109,7 +1131,7 @@ if supported_files:
                 }
             )
 
-        except Exception as exc:
+        except Exception:
 
             summary_data.append(
                 {
@@ -1124,7 +1146,6 @@ if supported_files:
     summary_df = pd.DataFrame(
         summary_data
     )
-
 
     st.dataframe(
         summary_df,
@@ -1143,17 +1164,16 @@ else:
 # FOOTER
 # ============================================================
 
-st.markdown(
+st.html(
     """
     <div class="footer">
 
         InsightAI • AI-Powered Data Intelligence Platform
 
-        <br>
+        <br><br>
 
         Analyze • Understand • Decide
 
     </div>
-    """,
-    unsafe_allow_html=True,
+    """
 )
