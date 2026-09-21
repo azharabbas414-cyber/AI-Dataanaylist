@@ -5,7 +5,7 @@ import pandas as pd
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # =========================================================
 
 st.set_page_config(
@@ -43,7 +43,6 @@ if "active_source" not in st.session_state:
 # =========================================================
 
 def get_repository_datasets():
-
     if not DATA_DIR.exists():
         return []
 
@@ -59,7 +58,7 @@ repository_datasets = get_repository_datasets()
 
 
 # =========================================================
-# LOAD REPOSITORY DATASET
+# DATA LOADERS
 # =========================================================
 
 @st.cache_data
@@ -73,34 +72,42 @@ def load_repository_file(file_path):
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
 
-    raise ValueError("Unsupported file format.")
+    raise ValueError(
+        "Unsupported file format."
+    )
 
-
-# =========================================================
-# LOAD UPLOADED DATASET
-# =========================================================
 
 @st.cache_data
-def load_uploaded_file(file_bytes, file_name):
+def load_uploaded_file(
+    file_bytes,
+    file_name,
+):
 
     suffix = Path(file_name).suffix.lower()
 
     if suffix == ".csv":
-        return pd.read_csv(BytesIO(file_bytes))
+        return pd.read_csv(
+            BytesIO(file_bytes)
+        )
 
     if suffix in [".xlsx", ".xls"]:
-        return pd.read_excel(BytesIO(file_bytes))
+        return pd.read_excel(
+            BytesIO(file_bytes)
+        )
 
-    raise ValueError("Unsupported file format.")
+    raise ValueError(
+        "Unsupported file format."
+    )
 
 
 # =========================================================
-# CUSTOM CSS
+# CUSTOM STYLING
 # =========================================================
 
 st.markdown(
     """
 <style>
+
 .main {
     padding-top: 1rem;
 }
@@ -108,7 +115,11 @@ st.markdown(
 .hero {
     padding: 42px;
     border-radius: 20px;
-    background: linear-gradient(135deg, #eef2f7, #dfe7ef);
+    background: linear-gradient(
+        135deg,
+        #eef2f7,
+        #dfe7ef
+    );
     border: 1px solid #cbd5e1;
     margin-bottom: 30px;
 }
@@ -161,9 +172,38 @@ st.markdown(
     background: #eff6ff;
 }
 
+.workflow-card {
+    padding: 20px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    min-height: 150px;
+}
+
+.workflow-number {
+    font-size: 13px;
+    font-weight: 800;
+    color: #64748b;
+    letter-spacing: 1px;
+}
+
+.workflow-title {
+    font-size: 20px;
+    font-weight: 750;
+    color: #1e293b;
+    margin-top: 8px;
+}
+
+.workflow-text {
+    font-size: 14px;
+    color: #64748b;
+    margin-top: 8px;
+}
+
 section[data-testid="stSidebar"] {
     background-color: #f8fafc;
 }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -171,14 +211,16 @@ section[data-testid="stSidebar"] {
 
 
 # =========================================================
-# SIDEBAR
+# SIDEBAR NAVIGATION
 # =========================================================
 
 with st.sidebar:
 
     st.markdown("## ✦ InsightAI")
 
-    st.caption("AI-Powered Data Analytics Platform")
+    st.caption(
+        "AI-Powered Data Analytics Platform"
+    )
 
     st.divider()
 
@@ -187,6 +229,11 @@ with st.sidebar:
     st.page_link(
         "streamlitapp.py",
         label="🏠 Home",
+    )
+
+    st.page_link(
+        "pages/00_Data_Cleaning.py",
+        label="🧹 Data Cleaning",
     )
 
     st.page_link(
@@ -218,10 +265,6 @@ with st.sidebar:
         "pages/06_Reports.py",
         label="📄 Reports",
     )
-    st.page_link(
-        "pages/00_Data_Cleaning.py", 
-        label="🧹 Data Cleaning"
-    )
 
     st.divider()
 
@@ -233,12 +276,15 @@ with st.sidebar:
     if st.session_state.active_dataset:
 
         st.success(
-            f"Active: {st.session_state.active_dataset}"
+            f"Active: "
+            f"{st.session_state.active_dataset}"
         )
 
     else:
 
-        st.caption("No active dataset")
+        st.caption(
+            "No active dataset"
+        )
 
 
 # =========================================================
@@ -247,9 +293,20 @@ with st.sidebar:
 
 hero_html = """
 <div class="hero">
-<div class="hero-small">INTELLIGENT DATA ANALYTICS</div>
-<div class="hero-title">InsightAI</div>
-<div class="hero-text">Transform raw data into interactive analytics, intelligent insights and decision-ready information.</div>
+
+<div class="hero-small">
+INTELLIGENT DATA ANALYTICS
+</div>
+
+<div class="hero-title">
+InsightAI
+</div>
+
+<div class="hero-text">
+Transform raw data into interactive analytics,
+intelligent insights and decision-ready information.
+</div>
+
 </div>
 """
 
@@ -263,35 +320,110 @@ st.markdown(
 # WORKFLOW
 # =========================================================
 
-st.markdown("## How InsightAI Works")
+st.markdown(
+    "## How InsightAI Works"
+)
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
+
 
 with col1:
 
-    st.markdown("### 01 · Select")
+    st.markdown(
+        """
+        <div class="workflow-card">
 
-    st.write(
-        "Choose an existing dataset from the repository "
-        "or upload a new CSV/Excel file."
+        <div class="workflow-number">
+        01 · SELECT
+        </div>
+
+        <div class="workflow-title">
+        Choose Data
+        </div>
+
+        <div class="workflow-text">
+        Select an existing dataset from
+        GitHub or upload a new CSV/Excel file.
+        </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
 
 with col2:
 
-    st.markdown("### 02 · Explore")
+    st.markdown(
+        """
+        <div class="workflow-card">
 
-    st.write(
-        "Profile the data, inspect quality, statistics, "
-        "relationships and trends."
+        <div class="workflow-number">
+        02 · CLEAN
+        </div>
+
+        <div class="workflow-title">
+        Prepare Data
+        </div>
+
+        <div class="workflow-text">
+        Fix missing values, duplicates,
+        data types, text and other quality issues.
+        </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
 
 with col3:
 
-    st.markdown("### 03 · Analyze")
+    st.markdown(
+        """
+        <div class="workflow-card">
 
-    st.write(
-        "Use dashboards, anomaly detection, forecasting "
-        "and AI-powered analysis."
+        <div class="workflow-number">
+        03 · EXPLORE
+        </div>
+
+        <div class="workflow-title">
+        Understand Data
+        </div>
+
+        <div class="workflow-text">
+        Explore statistics, relationships,
+        distributions, trends and data quality.
+        </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+with col4:
+
+    st.markdown(
+        """
+        <div class="workflow-card">
+
+        <div class="workflow-number">
+        04 · ANALYZE
+        </div>
+
+        <div class="workflow-title">
+        Discover Insights
+        </div>
+
+        <div class="workflow-text">
+        Use AI, dashboards, anomaly detection,
+        forecasting and professional reports.
+        </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -302,7 +434,9 @@ st.divider()
 # DATA SOURCE
 # =========================================================
 
-st.markdown("## Choose Your Data Source")
+st.markdown(
+    "## Choose Your Data Source"
+)
 
 existing_tab, upload_tab = st.tabs(
     [
@@ -313,16 +447,18 @@ existing_tab, upload_tab = st.tabs(
 
 
 # =========================================================
-# EXISTING GITHUB DATASETS
+# EXISTING DATASETS
 # =========================================================
 
 with existing_tab:
 
-    st.markdown("### Repository Datasets")
+    st.markdown(
+        "### Repository Datasets"
+    )
 
     st.caption(
-        "These datasets are already stored in the GitHub "
-        "`data/` folder."
+        "These datasets are already stored in "
+        "the GitHub `data/` folder."
     )
 
     if not repository_datasets:
@@ -345,7 +481,9 @@ with existing_tab:
             key="repository_dataset_selector",
         )
 
-        selected_file = DATA_DIR / selected_name
+        selected_file = (
+            DATA_DIR / selected_name
+        )
 
         if st.button(
             "📊 Use This Dataset",
@@ -384,21 +522,27 @@ with existing_tab:
 
 
 # =========================================================
-# UPLOAD NEW DATASET
+# UPLOAD DATASET
 # =========================================================
 
 with upload_tab:
 
-    st.markdown("### Upload a New Dataset")
+    st.markdown(
+        "### Upload a New Dataset"
+    )
 
     st.caption(
-        "Use this option when you want to analyze a "
-        "dataset that is not stored in GitHub."
+        "Use this option when you want to analyze "
+        "a dataset that is not stored in GitHub."
     )
 
     uploaded_file = st.file_uploader(
         "Choose CSV or Excel file",
-        type=["csv", "xlsx", "xls"],
+        type=[
+            "csv",
+            "xlsx",
+            "xls",
+        ],
         accept_multiple_files=False,
         key="new_dataset_uploader",
     )
@@ -407,7 +551,9 @@ with upload_tab:
 
         try:
 
-            file_bytes = uploaded_file.getvalue()
+            file_bytes = (
+                uploaded_file.getvalue()
+            )
 
             dataframe = load_uploaded_file(
                 file_bytes,
@@ -433,28 +579,49 @@ with upload_tab:
         except Exception as error:
 
             st.error(
-                f"Unable to read the uploaded file: {error}"
+                f"Unable to read dataset: {error}"
             )
+
+
+st.divider()
 
 
 # =========================================================
 # ACTIVE DATASET
 # =========================================================
 
-st.divider()
+st.markdown(
+    "## 🎯 Active Dataset"
+)
 
-st.markdown("## 🎯 Active Dataset")
 
 if st.session_state.active_dataframe is not None:
 
-    active_df = st.session_state.active_dataframe
+    active_df = (
+        st.session_state.active_dataframe
+    )
 
     active_html = f"""
 <div class="active-card">
-<b>Dataset:</b> {st.session_state.active_dataset}<br>
-<b>Source:</b> {st.session_state.active_source}<br>
-<b>Rows:</b> {len(active_df):,}<br>
-<b>Columns:</b> {len(active_df.columns):,}
+
+<b>Dataset:</b>
+{st.session_state.active_dataset}
+
+<br>
+
+<b>Source:</b>
+{st.session_state.active_source}
+
+<br>
+
+<b>Rows:</b>
+{len(active_df):,}
+
+<br>
+
+<b>Columns:</b>
+{len(active_df.columns):,}
+
 </div>
 """
 
@@ -465,56 +632,84 @@ if st.session_state.active_dataframe is not None:
 
     st.write("")
 
-col_clean, col_explore = st.columns(2)
+    # -----------------------------------------------------
+    # ACTIVE DATASET ACTIONS
+    # -----------------------------------------------------
 
-with col_clean:
-    if st.button(
-        "🧹 Open Data Cleaning",
-        type="primary",
-        use_container_width=True,
-        key="open_data_cleaning",
-    ):
-        st.switch_page("pages/00_Data_Cleaning.py")
+    col_clean, col_explore = st.columns(2)
 
-with col_explore:
-    if st.button(
-        "📊 Open Data Explorer",
-        use_container_width=True,
-        key="open_data_explorer",
-    ):
-        st.switch_page("pages/01_Data_Explorer.py")
+    with col_clean:
+
+        if st.button(
+            "🧹 Open Data Cleaning",
+            type="primary",
+            use_container_width=True,
+            key="open_data_cleaning",
+        ):
+
+            st.switch_page(
+                "pages/00_Data_Cleaning.py"
+            )
+
+    with col_explore:
+
+        if st.button(
+            "📊 Open Data Explorer",
+            use_container_width=True,
+            key="open_data_explorer",
+        ):
+
+            st.switch_page(
+                "pages/01_Data_Explorer.py"
+            )
+
 else:
 
     st.info(
-        "Select an existing dataset or upload a new "
-        "dataset to begin analysis."
+        "Select an existing dataset or upload "
+        "a new dataset to begin analysis."
     )
+
+
+st.divider()
 
 
 # =========================================================
 # REPOSITORY DATASET SUMMARY
 # =========================================================
 
-st.divider()
-
-st.markdown("## 📁 Repository Dataset Summary")
+st.markdown(
+    "## 📁 Repository Dataset Summary"
+)
 
 if repository_datasets:
 
     cols = st.columns(3)
 
-    for index, dataset in enumerate(repository_datasets):
+    for index, dataset in enumerate(
+        repository_datasets
+    ):
 
         with cols[index % 3]:
 
             size_kb = (
-                dataset.stat().st_size / 1024
+                dataset.stat().st_size
+                / 1024
             )
 
             dataset_html = f"""
 <div class="dataset-card">
-<div class="dataset-name">📄 {dataset.stem}</div>
-<div class="dataset-type">{dataset.suffix.upper()[1:]} • {size_kb:.1f} KB</div>
+
+<div class="dataset-name">
+📄 {dataset.stem}
+</div>
+
+<div class="dataset-type">
+{dataset.suffix.upper()[1:]}
+•
+{size_kb:.1f} KB
+</div>
+
 </div>
 """
 
@@ -531,5 +726,6 @@ if repository_datasets:
 st.divider()
 
 st.caption(
-    "InsightAI • AI-Powered Data Analytics & Decision Intelligence Platform"
+    "InsightAI • AI-Powered Data Analytics "
+    "& Decision Intelligence Platform"
 )
