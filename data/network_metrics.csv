@@ -1,0 +1,2 @@
+num_nodes,num_edges,density,avg_clustering,num_strongly_connected,max_in_degree,max_out_degree,avg_shortest_path
+200,135,0.0033919597989949747,0.12104761904761904,161,9,9,
