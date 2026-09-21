@@ -218,6 +218,10 @@ with st.sidebar:
         "pages/06_Reports.py",
         label="📄 Reports",
     )
+    st.page_link(
+        "pages/00_Data_Cleaning.py", 
+        label="🧹 Data Cleaning"
+    )
 
     st.divider()
 
