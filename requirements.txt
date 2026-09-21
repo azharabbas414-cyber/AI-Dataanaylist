@@ -8,3 +8,6 @@ openai
 grok
 reportlab
 python-docx
+reportlab
+python-docx
+plotly
