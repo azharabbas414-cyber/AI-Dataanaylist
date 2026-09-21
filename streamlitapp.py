@@ -43,7 +43,6 @@ if "active_source" not in st.session_state:
 # =========================================================
 
 def get_repository_datasets():
-    """Find CSV and Excel files in the repository data folder."""
 
     if not DATA_DIR.exists():
         return []
@@ -65,7 +64,6 @@ repository_datasets = get_repository_datasets()
 
 @st.cache_data
 def load_repository_file(file_path):
-    """Load a CSV or Excel file from the repository."""
 
     suffix = file_path.suffix.lower()
 
@@ -84,7 +82,6 @@ def load_repository_file(file_path):
 
 @st.cache_data
 def load_uploaded_file(file_bytes, file_name):
-    """Load an uploaded CSV or Excel file."""
 
     suffix = Path(file_name).suffix.lower()
 
@@ -104,12 +101,9 @@ def load_uploaded_file(file_bytes, file_name):
 st.markdown(
     """
 <style>
-
 .main {
     padding-top: 1rem;
 }
-
-/* Hero */
 
 .hero {
     padding: 42px;
@@ -139,37 +133,6 @@ st.markdown(
     max-width: 850px;
 }
 
-
-/* Source cards */
-
-.source-card {
-    padding: 24px;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    min-height: 180px;
-}
-
-.source-icon {
-    font-size: 30px;
-}
-
-.source-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #1e293b;
-    margin-top: 8px;
-}
-
-.source-description {
-    color: #64748b;
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-
-/* Dataset cards */
-
 .dataset-card {
     padding: 18px;
     border-radius: 14px;
@@ -191,9 +154,6 @@ st.markdown(
     margin-top: 7px;
 }
 
-
-/* Active dataset */
-
 .active-card {
     padding: 20px;
     border-radius: 14px;
@@ -201,13 +161,9 @@ st.markdown(
     background: #eff6ff;
 }
 
-
-/* Sidebar */
-
 section[data-testid="stSidebar"] {
     background-color: #f8fafc;
 }
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -285,29 +241,22 @@ with st.sidebar:
 # HERO
 # =========================================================
 
-st.markdown(
-    """
+hero_html = """
 <div class="hero">
-    <div class="hero-small">
-        INTELLIGENT DATA ANALYTICS
-    </div>
-
-    <div class="hero-title">
-        InsightAI
-    </div>
-
-    <div class="hero-text">
-        Transform raw data into interactive analytics,
-        intelligent insights and decision-ready information.
-    </div>
+<div class="hero-small">INTELLIGENT DATA ANALYTICS</div>
+<div class="hero-title">InsightAI</div>
+<div class="hero-text">Transform raw data into interactive analytics, intelligent insights and decision-ready information.</div>
 </div>
-""",
+"""
+
+st.markdown(
+    hero_html,
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# PLATFORM WORKFLOW
+# WORKFLOW
 # =========================================================
 
 st.markdown("## How InsightAI Works")
@@ -382,7 +331,8 @@ with existing_tab:
     else:
 
         dataset_names = [
-            file.name for file in repository_datasets
+            file.name
+            for file in repository_datasets
         ]
 
         selected_name = st.selectbox(
@@ -495,17 +445,17 @@ if st.session_state.active_dataframe is not None:
 
     active_df = st.session_state.active_dataframe
 
-    st.markdown(
-        f"""
+    active_html = f"""
 <div class="active-card">
-
 <b>Dataset:</b> {st.session_state.active_dataset}<br>
 <b>Source:</b> {st.session_state.active_source}<br>
 <b>Rows:</b> {len(active_df):,}<br>
 <b>Columns:</b> {len(active_df.columns):,}
-
 </div>
-""",
+"""
+
+    st.markdown(
+        active_html,
         unsafe_allow_html=True,
     )
 
@@ -550,21 +500,15 @@ if repository_datasets:
                 dataset.stat().st_size / 1024
             )
 
-            st.markdown(
-                f"""
+            dataset_html = f"""
 <div class="dataset-card">
-
-    <div class="dataset-name">
-        📄 {dataset.stem}
-    </div>
-
-    <div class="dataset-type">
-        {dataset.suffix.upper()[1:]}
-        • {size_kb:.1f} KB
-    </div>
-
+<div class="dataset-name">📄 {dataset.stem}</div>
+<div class="dataset-type">{dataset.suffix.upper()[1:]} • {size_kb:.1f} KB</div>
 </div>
-""",
+"""
+
+            st.markdown(
+                dataset_html,
                 unsafe_allow_html=True,
             )
 
