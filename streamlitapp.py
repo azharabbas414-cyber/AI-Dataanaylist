@@ -928,7 +928,11 @@ def _render_workflow_sidebar():
             if key == "network" and not _dataset_is_network():
                 continue
             if unlocked.get(key):
-                st.page_link("streamlitapp.py" if key == "home" else dict(WORKFLOW)[key], label=f"{icon} {label}")
+                # IMPORTANT: the entrypoint script itself is not a valid page-link
+                # target when st.navigation() is controlling routing. Use the
+                # registered StreamlitPage objects for every destination.
+                target_page = PAGE_OBJECTS[key]
+                st.page_link(target_page, label=f"{icon} {label}")
             else:
                 st.markdown(f"<div style='padding:7px 8px; opacity:.42;'>🔒 {label}</div>", unsafe_allow_html=True)
 
@@ -960,6 +964,21 @@ pages = {
 
 # st.navigation must know all pages so custom page links can route to them.
 pg = st.navigation(pages, position="hidden")
+
+# Keep the exact registered StreamlitPage objects for sidebar navigation.
+# This is especially important for Home: linking to "streamlitapp.py" directly
+# causes StreamlitPageNotFoundError because the entrypoint is not a normal page.
+PAGE_OBJECTS = {
+    "home": home_page,
+    "cleaning": pages["Workflow"][0],
+    "explorer": pages["Workflow"][1],
+    "dashboard": pages["Workflow"][2],
+    "ai": pages["Workflow"][3],
+    "anomaly": pages["Workflow"][4],
+    "forecasting": pages["Workflow"][5],
+    "network": pages["Workflow"][6],
+    "reports": pages["Workflow"][7],
+}
 
 # Render our custom workflow sidebar after the router is registered.
 _render_workflow_sidebar()
