@@ -163,8 +163,8 @@ def top_endpoints(df: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
 
 
 def top_conversations(df: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
-    src = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip"])
-    dst = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip"])
+    src = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip", "ipv4 source", "ipv4_source", "source"])
+    dst = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip", "ipv4 destination", "ipv4_destination", "destination"])
     if not src or not dst:
         return pd.DataFrame()
 
