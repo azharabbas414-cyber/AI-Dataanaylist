@@ -37,11 +37,11 @@ def analyze_network_capture(
         }
 
     protocol_col = _first_existing(
-        df, ["_ws.col.protocol", "protocol", "ip.proto", "frame.protocols", "frame_protocols"]
+        df, ["_ws.col.protocol", "protocol", "protocols", "ip.proto", "frame.protocols", "frame_protocols"]
     )
-    src_col = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip", "eth.src", "source"])
-    dst_col = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip", "eth.dst", "destination"])
-    length_col = _first_existing(df, ["frame.len", "frame_len", "length", "len"])
+    src_col = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip", "ipv4 source", "ipv4_source", "eth.src", "source"])
+    dst_col = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip", "ipv4 destination", "ipv4_destination", "eth.dst", "destination"])
+    length_col = _first_existing(df, ["frame.len", "frame_len", "packet length", "packet_length", "length", "len"])
     time_col = _first_existing(
         df, ["frame.time_epoch", "frame.time", "frame_time", "timestamp", "time"]
     )
@@ -124,7 +124,7 @@ def analyze_network_capture(
 
 def protocol_distribution(df: pd.DataFrame) -> pd.DataFrame:
     col = _first_existing(
-        df, ["_ws.col.protocol", "protocol", "ip.proto", "frame.protocols", "frame_protocols"]
+        df, ["_ws.col.protocol", "protocol", "protocols", "ip.proto", "frame.protocols", "frame_protocols"]
     )
     if not col:
         return pd.DataFrame()
@@ -139,8 +139,8 @@ def protocol_distribution(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def top_endpoints(df: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
-    src = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip", "eth.src", "source"])
-    dst = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip", "eth.dst", "destination"])
+    src = _first_existing(df, ["ip.src", "ipv6.src", "ip_src", "src_ip", "ipv4 source", "ipv4_source", "eth.src", "source"])
+    dst = _first_existing(df, ["ip.dst", "ipv6.dst", "ip_dst", "dst_ip", "ipv4 destination", "ipv4_destination", "eth.dst", "destination"])
     if not src and not dst:
         return pd.DataFrame()
 
