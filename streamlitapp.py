@@ -243,6 +243,93 @@ st.markdown(
         font-size: 12px;
     }
 
+
+
+    /* ======================================================
+       POLISHED APP UI
+       ====================================================== */
+
+    .app-shell-note {
+        font-size: 12px;
+        color: #64748b;
+        margin-top: -4px;
+    }
+
+    .sidebar-brand {
+        background: linear-gradient(145deg, rgba(91,92,226,.12), rgba(14,165,233,.06));
+        border: 1px solid rgba(91,92,226,.15);
+        border-radius: 18px;
+        padding: 18px 14px 16px;
+        margin-bottom: 10px;
+    }
+
+    .sidebar-brand-title {
+        font-size: 24px;
+        font-weight: 850;
+        letter-spacing: -.7px;
+    }
+
+    .sidebar-brand-subtitle {
+        font-size: 11px;
+        opacity: .62;
+        margin-top: 5px;
+    }
+
+    .sidebar-section-label {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        opacity: .48;
+        margin: 14px 0 7px;
+    }
+
+    .hero {
+        position: relative;
+        overflow: hidden;
+        padding: 42px 46px;
+        border-radius: 26px;
+        margin-bottom: 28px;
+        background: linear-gradient(135deg, rgba(91,92,226,.13), rgba(14,165,233,.07) 55%, rgba(16,185,129,.05));
+        border: 1px solid rgba(91,92,226,.16);
+        box-shadow: 0 18px 45px rgba(15,23,42,.05);
+    }
+
+    .hero::after {
+        content: "";
+        position: absolute;
+        width: 220px;
+        height: 220px;
+        right: -70px;
+        top: -80px;
+        border-radius: 50%;
+        background: rgba(91,92,226,.08);
+    }
+
+    .source-card {
+        min-height: 105px;
+        padding: 20px;
+        border-radius: 18px;
+        border: 1px solid rgba(100,116,139,.16);
+        background: rgba(255,255,255,.72);
+    }
+
+    .active-card {
+        box-shadow: 0 12px 30px rgba(15,23,42,.05);
+    }
+
+    div[data-testid="stMetric"] {
+        background: rgba(255,255,255,.72);
+        border: 1px solid rgba(100,116,139,.13);
+        border-radius: 15px;
+        padding: 12px 14px;
+    }
+
+    .footer {
+        border-top: 1px solid rgba(100,116,139,.12);
+        margin-top: 45px;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -273,50 +360,23 @@ with st.sidebar:
 
     st.divider()
 
-    st.page_link(
-        "streamlitapp.py",
-        label="🏠 Home",
-    )
+    st.markdown('<div class="sidebar-section-label">Workspace</div>', unsafe_allow_html=True)
 
-    st.page_link(
-        "pages/00_Data_Cleaning.py",
-        label="🧹 Data Cleaning",
-    )
+    st.page_link("streamlitapp.py", label="🏠  Home")
+    st.page_link("pages/01_Data_Explorer.py", label="📊  Data Explorer")
+    st.page_link("pages/02_Dashboard.py", label="📈  Dashboard")
 
-    st.page_link(
-        "pages/01_Data_Explorer.py",
-        label="📊 Data Explorer",
-    )
+    st.markdown('<div class="sidebar-section-label">Intelligence</div>', unsafe_allow_html=True)
 
-    st.page_link(
-        "pages/02_Dashboard.py",
-        label="📈 Dashboard",
-    )
+    st.page_link("pages/03_AI_Analyst.py", label="🤖  AI Analyst")
+    st.page_link("pages/04_Anomaly_Detection.py", label="🚨  Anomaly Detection")
+    st.page_link("pages/05_Forecasting.py", label="🔮  Forecasting")
+    st.page_link("pages/07_Network_Intelligence.py", label="🌐  Network Intelligence")
 
-    st.page_link(
-        "pages/03_AI_Analyst.py",
-        label="🤖 AI Analyst",
-    )
+    st.markdown('<div class="sidebar-section-label">Data & Reports</div>', unsafe_allow_html=True)
 
-    st.page_link(
-        "pages/04_Anomaly_Detection.py",
-        label="🚨 Anomaly Detection",
-    )
-
-    st.page_link(
-        "pages/05_Forecasting.py",
-        label="🔮 Forecasting",
-    )
-
-    st.page_link(
-        "pages/06_Reports.py",
-        label="📄 Reports",
-    )
-
-    st.page_link(
-        "pages/07_Network_Intelligence.py",
-        label="🌐 Network Intelligence",
-    )
+    st.page_link("pages/00_Data_Cleaning.py", label="🧹  Data Cleaning")
+    st.page_link("pages/06_Reports.py", label="📄  Reports")
 
     st.divider()
 
@@ -378,9 +438,7 @@ st.html(
         </div>
 
         <div class="hero-subtitle">
-            AI-powered data analytics and decision intelligence
-            platform for exploring, cleaning, analyzing,
-            forecasting and understanding your data.
+            Turn raw data into answers, explanations and decisions — with analytics, AI, anomaly detection, forecasting and network intelligence in one workspace.
         </div>
 
     </div>
