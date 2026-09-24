@@ -1,19 +1,17 @@
-import streamlit as st
-import pandas as pd
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
 from core.forecasting import (
-    detect_datetime_columns,
-    prepare_time_series,
     build_forecast,
     calculate_model_accuracy,
+    detect_datetime_columns,
+    prepare_time_series,
 )
 
-
-# ============================================================
-# PAGE CONFIG
-# ============================================================
 
 st.set_page_config(
     page_title="InsightAI | Forecasting",
@@ -22,1087 +20,379 @@ st.set_page_config(
 )
 
 
-# ============================================================
-# CSS
-# ============================================================
-
 st.markdown(
     """
     <style>
-
-    .forecast-header {
-        padding: 24px 28px;
-        border-radius: 16px;
+    .forecast-hero {
+        padding: 30px 34px;
+        border-radius: 22px;
         margin-bottom: 24px;
-        background: linear-gradient(
-            135deg,
-            rgba(99, 102, 241, 0.14),
-            rgba(59, 130, 246, 0.08)
-        );
-        border: 1px solid rgba(100, 116, 139, 0.18);
+        background: linear-gradient(135deg, rgba(99,102,241,.14), rgba(14,165,233,.08));
+        border: 1px solid rgba(100,116,139,.18);
     }
-
-    .forecast-header h1 {
-        margin: 0;
-        font-size: 32px;
-        font-weight: 700;
+    .forecast-hero h1 { margin: 0; font-size: 36px; font-weight: 800; }
+    .forecast-hero p { margin: 8px 0 0; opacity: .7; font-size: 15px; }
+    .section-title { font-size: 22px; font-weight: 750; margin: 26px 0 12px; }
+    .insight-box {
+        padding: 18px 20px;
+        border-radius: 16px;
+        border: 1px solid rgba(100,116,139,.18);
+        background: rgba(100,116,139,.045);
+        line-height: 1.6;
     }
-
-    .forecast-header p {
-        margin-top: 8px;
-        color: #64748b;
-        font-size: 15px;
-    }
-
-    .section-title {
-        font-size: 21px;
-        font-weight: 700;
-        margin-top: 26px;
-        margin-bottom: 12px;
-    }
-
-    .metric-card {
-        padding: 18px;
-        border-radius: 14px;
-        border: 1px solid rgba(100, 116, 139, 0.18);
-        min-height: 110px;
-    }
-
-    .metric-label {
-        color: #64748b;
-        font-size: 13px;
-    }
-
-    .metric-value {
-        font-size: 27px;
-        font-weight: 700;
-        margin-top: 6px;
-    }
-
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# ============================================================
-# ACTIVE DATASET
-# ============================================================
-
-if "active_dataframe" not in st.session_state:
-    st.session_state.active_dataframe = None
-
-
-if st.session_state.active_dataframe is None:
-
-    st.warning(
-        "No active dataset found. Please select or upload a dataset from the Home page."
-    )
-
+if st.session_state.get("active_dataframe") is None:
+    st.warning("No active dataset found. Please upload or connect a dataset from the Home page.")
     if st.button("🏠 Go to Home", type="primary"):
         st.switch_page("streamlitapp.py")
-
     st.stop()
 
 
 df = st.session_state.active_dataframe.copy()
-
-
 if df.empty:
-
     st.warning("The active dataset is empty.")
-
     st.stop()
 
 
-# ============================================================
-# HEADER
-# ============================================================
-
-dataset_name = st.session_state.get(
-    "active_dataset",
-    "Active Dataset",
-)
+dataset_name = st.session_state.get("active_dataset", "Active Dataset")
 
 st.markdown(
     f"""
-    <div class="forecast-header">
-        <h1>🔮 Forecasting</h1>
-        <p>
-            Analyze historical trends and generate future predictions
-            from <b>{dataset_name}</b>.
-        </p>
+    <div class="forecast-hero">
+        <h1>🔮 Forecasting Intelligence</h1>
+        <p>Discover trend, seasonality and future movement in <b>{dataset_name}</b> — with automatic model selection and uncertainty ranges.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 
-# ============================================================
-# DATE DETECTION
-# ============================================================
+# ------------------------------------------------------------------
+# Detect candidate fields
+# ------------------------------------------------------------------
 
 try:
-
     date_columns = detect_datetime_columns(df)
-
 except Exception as exc:
-
-    st.error(
-        f"Date detection failed: {exc}"
-    )
-
+    st.error(f"Date detection failed: {exc}")
     st.stop()
-
-
-if not date_columns:
-
-    st.warning(
-        "No suitable date/time column was automatically detected."
-    )
-
-    st.markdown(
-        """
-        ### What Forecasting Needs
-
-        Your dataset should contain a column such as:
-
-        - Date
-        - Time
-        - Timestamp
-        - Month
-        - Year
-        - DateTime
-        - Period
-
-        Example:
-
-        `2026-01-01`, `2026-02-01`, `2026-03-01`
-        """
-    )
-
-    st.stop()
-
-
-# ============================================================
-# NUMERIC COLUMN DETECTION
-# ============================================================
 
 numeric_columns = []
-
 for column in df.columns:
-
-    converted = pd.to_numeric(
-        df[column],
-        errors="coerce",
-    )
-
-    if converted.notna().sum() >= 5:
+    converted = pd.to_numeric(df[column], errors="coerce")
+    if converted.notna().sum() >= 5 and converted.nunique(dropna=True) > 1:
         numeric_columns.append(column)
 
+if not date_columns:
+    st.warning("No suitable date/time column was detected.")
+    st.info("Add a Date, Time, Timestamp, Month or similar field to use forecasting.")
+    st.stop()
 
 if not numeric_columns:
-
-    st.warning(
-        "No suitable numeric metric was found for forecasting."
-    )
-
+    st.warning("No suitable numeric metric was found for forecasting.")
     st.stop()
 
 
-# ============================================================
-# FORECAST CONFIGURATION
-# ============================================================
+# ------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------
 
-st.markdown(
-    '<div class="section-title">⚙️ Forecast Configuration</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="section-title">⚙️ Forecast Setup</div>', unsafe_allow_html=True)
 
+c1, c2, c3, c4 = st.columns([1.35, 1.35, 1, 1.2])
 
-control1, control2, control3 = st.columns(
-    [1.5, 1.5, 1]
-)
+with c1:
+    date_column = st.selectbox("Date / Time", date_columns, key="forecast_date_column_v2")
 
+with c2:
+    metric_column = st.selectbox("Metric", numeric_columns, key="forecast_metric_column_v2")
 
-with control1:
+with c3:
+    horizon = st.selectbox("Future periods", [7, 14, 30, 60, 90], index=2, key="forecast_horizon_v2")
 
-    date_column = st.selectbox(
-        "Date / Time Column",
-        date_columns,
-        key="forecast_date_column",
+with c4:
+    model_choice = st.selectbox(
+        "Forecast model",
+        ["Auto", "Holt-Winters", "Random Forest", "Seasonal Naive"],
+        key="forecast_model_choice_v2",
+        help="Auto evaluates the available models on a chronological holdout and selects the strongest historical fit.",
     )
 
-
-with control2:
-
-    metric_column = st.selectbox(
-        "Metric to Forecast",
-        numeric_columns,
-        key="forecast_metric_column",
-    )
-
-
-with control3:
-
-    horizon = st.selectbox(
-        "Forecast Horizon",
-        [7, 14, 30, 60, 90],
-        index=2,
-        key="forecast_horizon",
-    )
-
-
-# ============================================================
-# PREPARE TIME SERIES
-# ============================================================
 
 try:
-
-    prepared = prepare_time_series(
-        df,
-        date_column,
-        metric_column,
-    )
-
+    prepared = prepare_time_series(df, date_column, metric_column)
 except Exception as exc:
-
-    st.error(
-        f"Unable to prepare the time series: {exc}"
-    )
-
+    st.error(f"Unable to prepare the time series: {exc}")
     st.stop()
-
-
-if prepared is None or len(prepared) < 5:
-
-    st.warning(
-        "There are not enough valid historical observations "
-        "to generate a forecast."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# NORMALIZE PREPARED DATA
-# ============================================================
-
-prepared = prepared.copy()
-
-
-# Find date column returned by prepare_time_series()
-
-date_candidates = [
-    column
-    for column in prepared.columns
-    if (
-        "date" in str(column).lower()
-        or "time" in str(column).lower()
-        or "timestamp" in str(column).lower()
-    )
-]
-
-
-if date_candidates:
-
-    prepared_date_column = date_candidates[0]
-
-else:
-
-    prepared_date_column = prepared.columns[0]
-
-
-# Find numeric value column
-
-if metric_column in prepared.columns:
-
-    prepared_value_column = metric_column
-
-else:
-
-    prepared_numeric_columns = [
-        column
-        for column in prepared.columns
-        if pd.api.types.is_numeric_dtype(
-            prepared[column]
-        )
-    ]
-
-    if not prepared_numeric_columns:
-
-        st.error(
-            "Could not identify the numeric value column "
-            "after preparing the time series."
-        )
-
-        st.stop()
-
-    prepared_value_column = (
-        prepared_numeric_columns[-1]
-    )
-
-
-prepared[prepared_date_column] = pd.to_datetime(
-    prepared[prepared_date_column],
-    errors="coerce",
-)
-
-
-prepared[prepared_value_column] = pd.to_numeric(
-    prepared[prepared_value_column],
-    errors="coerce",
-)
-
-
-prepared = prepared.dropna(
-    subset=[
-        prepared_date_column,
-        prepared_value_column,
-    ]
-)
-
-
-prepared = prepared.sort_values(
-    prepared_date_column
-)
-
 
 if len(prepared) < 5:
-
-    st.warning(
-        "Not enough valid observations remain after cleaning "
-        "the time series."
-    )
-
+    st.warning("At least 5 valid time-series observations are required.")
     st.stop()
 
-
-# ============================================================
-# HISTORICAL SUMMARY
-# ============================================================
-
-latest_value = prepared[
-    prepared_value_column
-].iloc[-1]
+latest_value = float(prepared[metric_column].iloc[-1])
+first_value = float(prepared[metric_column].iloc[0])
 
 
-average_value = prepared[
-    prepared_value_column
-].mean()
+# ------------------------------------------------------------------
+# Historical KPI cards
+# ------------------------------------------------------------------
+
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Observations", f"{len(prepared):,}")
+k2.metric("Latest", f"{latest_value:,.2f}")
+k3.metric("Average", f"{prepared[metric_column].mean():,.2f}")
+k4.metric("Minimum", f"{prepared[metric_column].min():,.2f}")
+k5.metric("Maximum", f"{prepared[metric_column].max():,.2f}")
 
 
-minimum_value = prepared[
-    prepared_value_column
-].min()
+# ------------------------------------------------------------------
+# Generate
+# ------------------------------------------------------------------
+
+if st.button("🚀 Generate Intelligent Forecast", type="primary", use_container_width=True):
+    st.session_state["forecast_result_v2"] = None
+    with st.spinner("Testing forecasting patterns and building the prediction..."):
+        try:
+            st.session_state["forecast_result_v2"] = build_forecast(
+                prepared,
+                date_column,
+                metric_column,
+                forecast_periods=int(horizon),
+                model_name=model_choice,
+            )
+        except Exception as exc:
+            st.error(f"Forecast model could not be built: {exc}")
+            st.exception(exc)
+
+result = st.session_state.get("forecast_result_v2")
+
+if result is None:
+    st.info("Choose your fields and click **Generate Intelligent Forecast** to begin.")
+    st.stop()
+
+forecast = result["forecast"].copy()
+forecast_date = date_column
+forecast_value = "forecast"
 
 
-maximum_value = prepared[
-    prepared_value_column
-].max()
+# ------------------------------------------------------------------
+# Model / diagnostics summary
+# ------------------------------------------------------------------
 
+model_name = result["model_name"]
+auto_best = result.get("auto_best_model", model_name)
+diagnostics = result["diagnostics"]
 
-# ============================================================
-# KPI CARDS
-# ============================================================
+st.markdown('<div class="section-title">🧠 Forecast Intelligence</div>', unsafe_allow_html=True)
 
-st.markdown(
-    '<div class="section-title">📌 Historical Summary</div>',
-    unsafe_allow_html=True,
-)
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Selected Model", model_name)
+s2.metric("Detected Frequency", str(result.get("frequency") or "Irregular"))
+s3.metric("Seasonal Pattern", f"{result.get('seasonal_period', 1)} periods")
 
-
-k1, k2, k3, k4 = st.columns(4)
-
-
-with k1:
-
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">Observations</div>
-            <div class="metric-value">
-                {len(prepared):,}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+final_change = diagnostics.get("final_change_pct")
+with s4:
+    st.metric(
+        "End vs Latest",
+        f"{final_change:+.2f}%" if final_change is not None else "N/A",
     )
 
 
-with k2:
+# ------------------------------------------------------------------
+# Main forecast chart
+# ------------------------------------------------------------------
 
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">Latest Value</div>
-            <div class="metric-value">
-                {latest_value:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.markdown('<div class="section-title">📈 Historical + Forecast + 95% Range</div>', unsafe_allow_html=True)
 
+fig = go.Figure()
 
-with k3:
-
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">Average</div>
-            <div class="metric-value">
-                {average_value:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-with k4:
-
-    st.markdown(
-        f"""
-        <div class="metric-card">
-            <div class="metric-label">Range</div>
-            <div class="metric-value">
-                {minimum_value:,.2f} — {maximum_value:,.2f}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ============================================================
-# HISTORICAL TREND
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">📈 Historical Trend</div>',
-    unsafe_allow_html=True,
-)
-
-
-historical_fig = go.Figure()
-
-
-historical_fig.add_trace(
+fig.add_trace(
     go.Scatter(
-        x=prepared[prepared_date_column],
-        y=prepared[prepared_value_column],
+        x=prepared[date_column],
+        y=prepared[metric_column],
         mode="lines+markers",
         name="Historical",
+        line=dict(width=2.5),
+        marker=dict(size=5),
     )
 )
 
-
-historical_fig.update_layout(
-    title=f"Historical {metric_column}",
-    height=450,
-    margin=dict(
-        l=20,
-        r=20,
-        t=60,
-        b=20,
-    ),
-    xaxis_title="Date",
-    yaxis_title=metric_column,
-    hovermode="x unified",
-)
-
-
-st.plotly_chart(
-    historical_fig,
-    use_container_width=True,
-)
-
-
-# ============================================================
-# BUILD FORECAST
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">🔮 Generate Forecast</div>',
-    unsafe_allow_html=True,
-)
-
-
-with st.spinner(
-    "Building forecasting model..."
-):
-
-    try:
-
-        # IMPORTANT:
-        # Existing core.forecasting.py expects:
-        #
-        # build_forecast(
-        #     df,
-        #     date_column,
-        #     value_column,
-        #     forecast_periods
-        # )
-
-        forecast_result = build_forecast(
-            prepared,
-            prepared_date_column,
-            prepared_value_column,
-            forecast_periods=horizon,
-        )
-
-    except Exception as exc:
-
-        st.error(
-            f"Forecast model could not be built: {exc}"
-        )
-
-        st.stop()
-
-
-# ============================================================
-# NORMALIZE FORECAST RESULT
-# ============================================================
-
-forecast_df = None
-model = None
-
-
-if isinstance(
-    forecast_result,
-    pd.DataFrame,
-):
-
-    forecast_df = forecast_result
-
-
-elif isinstance(
-    forecast_result,
-    tuple,
-):
-
-    for item in forecast_result:
-
-        if isinstance(
-            item,
-            pd.DataFrame,
-        ):
-
-            forecast_df = item
-
-        else:
-
-            model = item
-
-
-elif isinstance(
-    forecast_result,
-    dict,
-):
-
-    for key in [
-        "forecast",
-        "forecast_df",
-        "predictions",
-        "result",
-    ]:
-
-        if isinstance(
-            forecast_result.get(key),
-            pd.DataFrame,
-        ):
-
-            forecast_df = forecast_result[key]
-
-            break
-
-    model = forecast_result.get(
-        "model"
-    )
-
-
-if forecast_df is None:
-
-    st.error(
-        "The forecasting engine returned an "
-        "unsupported result format."
-    )
-
-    st.stop()
-
-
-forecast_df = forecast_df.copy()
-
-
-# ============================================================
-# IDENTIFY FORECAST DATE COLUMN
-# ============================================================
-
-forecast_date_candidates = [
-    column
-    for column in forecast_df.columns
-    if (
-        "date" in str(column).lower()
-        or "time" in str(column).lower()
-        or "timestamp" in str(column).lower()
-    )
-]
-
-
-if forecast_date_candidates:
-
-    forecast_date_column = (
-        forecast_date_candidates[0]
-    )
-
-else:
-
-    forecast_date_column = (
-        forecast_df.columns[0]
-    )
-
-
-# ============================================================
-# IDENTIFY FORECAST VALUE COLUMN
-# ============================================================
-
-forecast_numeric_candidates = [
-    column
-    for column in forecast_df.columns
-    if pd.api.types.is_numeric_dtype(
-        forecast_df[column]
-    )
-]
-
-
-if not forecast_numeric_candidates:
-
-    st.error(
-        "No numeric forecast values were returned "
-        "by the model."
-    )
-
-    st.stop()
-
-
-prediction_candidates = [
-    column
-    for column in forecast_numeric_candidates
-    if any(
-        word in str(column).lower()
-        for word in [
-            "forecast",
-            "prediction",
-            "predicted",
-            "yhat",
-        ]
-    )
-]
-
-
-if prediction_candidates:
-
-    forecast_value_column = (
-        prediction_candidates[0]
-    )
-
-else:
-
-    forecast_value_column = (
-        forecast_numeric_candidates[-1]
-    )
-
-
-# ============================================================
-# CLEAN FORECAST
-# ============================================================
-
-forecast_df[
-    forecast_date_column
-] = pd.to_datetime(
-    forecast_df[
-        forecast_date_column
-    ],
-    errors="coerce",
-)
-
-
-forecast_df[
-    forecast_value_column
-] = pd.to_numeric(
-    forecast_df[
-        forecast_value_column
-    ],
-    errors="coerce",
-)
-
-
-forecast_df = forecast_df.dropna(
-    subset=[
-        forecast_date_column,
-        forecast_value_column,
-    ]
-)
-
-
-if forecast_df.empty:
-
-    st.error(
-        "The forecast result contains no valid "
-        "prediction values."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# FORECAST CHART
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">📈 Forecast Result</div>',
-    unsafe_allow_html=True,
-)
-
-
-forecast_fig = go.Figure()
-
-
-forecast_fig.add_trace(
+fig.add_trace(
     go.Scatter(
-        x=prepared[prepared_date_column],
-        y=prepared[prepared_value_column],
+        x=forecast[forecast_date],
+        y=forecast["upper_bound"],
         mode="lines",
-        name="Historical",
+        line=dict(width=0),
+        name="Upper 95%",
+        showlegend=False,
+        hoverinfo="skip",
     )
 )
 
-
-forecast_fig.add_trace(
+fig.add_trace(
     go.Scatter(
-        x=forecast_df[forecast_date_column],
-        y=forecast_df[forecast_value_column],
+        x=forecast[forecast_date],
+        y=forecast["lower_bound"],
+        mode="lines",
+        line=dict(width=0),
+        fill="tonexty",
+        name="95% prediction range",
+        hoverinfo="skip",
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x=forecast[forecast_date],
+        y=forecast[forecast_value],
         mode="lines+markers",
         name="Forecast",
-        line=dict(
-            dash="dash"
-        ),
+        line=dict(width=3, dash="dash"),
+        marker=dict(size=7),
     )
 )
 
-
-forecast_fig.update_layout(
-    title=(
-        f"{metric_column} — "
-        "Historical vs Forecast"
-    ),
-    height=500,
-    margin=dict(
-        l=20,
-        r=20,
-        t=60,
-        b=20,
-    ),
-    xaxis_title="Date",
-    yaxis_title=metric_column,
+fig.update_layout(
+    height=540,
+    margin=dict(l=20, r=20, t=30, b=20),
     hovermode="x unified",
+    legend=dict(orientation="h", y=1.05),
+    xaxis_title="Date / Time",
+    yaxis_title=str(metric_column),
 )
 
-
-st.plotly_chart(
-    forecast_fig,
-    use_container_width=True,
-)
+st.plotly_chart(fig, use_container_width=True)
 
 
-# ============================================================
-# FORECAST SUMMARY
-# ============================================================
+# ------------------------------------------------------------------
+# Trend interpretation
+# ------------------------------------------------------------------
 
-forecast_values = forecast_df[
-    forecast_value_column
-].dropna()
+st.markdown('<div class="section-title">💡 What the Forecast Says</div>', unsafe_allow_html=True)
 
+recent_change = diagnostics.get("recent_change_pct")
+forecast_mean = diagnostics.get("forecast_mean")
 
-if not forecast_values.empty:
-
-    first_forecast = forecast_values.iloc[0]
-
-    last_forecast = forecast_values.iloc[-1]
-
-    forecast_average = forecast_values.mean()
-
-    if latest_value != 0:
-
-        forecast_change = (
-            (
-                last_forecast
-                - latest_value
-            )
-            / abs(latest_value)
-            * 100
-        )
-
+if final_change is not None:
+    if final_change > 10:
+        direction = "upward"
+    elif final_change < -10:
+        direction = "downward"
     else:
-
-        forecast_change = np.nan
-
-
-    st.markdown(
-        '<div class="section-title">📊 Forecast Summary</div>',
-        unsafe_allow_html=True,
-    )
-
-
-    f1, f2, f3, f4 = st.columns(4)
-
-
-    with f1:
-
-        st.metric(
-            "Forecast Points",
-            f"{len(forecast_values):,}",
-        )
-
-
-    with f2:
-
-        st.metric(
-            "First Forecast",
-            f"{first_forecast:,.2f}",
-        )
-
-
-    with f3:
-
-        st.metric(
-            "Final Forecast",
-            f"{last_forecast:,.2f}",
-        )
-
-
-    with f4:
-
-        if np.isfinite(
-            forecast_change
-        ):
-
-            st.metric(
-                "Change vs Latest",
-                f"{forecast_change:+.2f}%",
-            )
-
-        else:
-
-            st.metric(
-                "Change vs Latest",
-                "N/A",
-            )
-
-
-# ============================================================
-# MODEL ACCURACY
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">🎯 Model Accuracy</div>',
-    unsafe_allow_html=True,
-)
-
-
-accuracy = None
-
-
-try:
-
-    accuracy = calculate_model_accuracy(
-        prepared,
-        model,
-    )
-
-except Exception:
-
-    accuracy = None
-
-
-if isinstance(
-    accuracy,
-    dict,
-):
-
-    accuracy_items = list(
-        accuracy.items()
-    )
-
-    accuracy_cols = st.columns(
-        max(1, len(accuracy_items))
-    )
-
-    for index, (
-        key,
-        value,
-    ) in enumerate(
-        accuracy_items
-    ):
-
-        with accuracy_cols[index]:
-
-            label = (
-                str(key)
-                .replace("_", " ")
-                .title()
-            )
-
-            if isinstance(
-                value,
-                (
-                    int,
-                    float,
-                    np.number,
-                ),
-            ):
-
-                st.metric(
-                    label,
-                    f"{float(value):.2f}",
-                )
-
-            else:
-
-                st.metric(
-                    label,
-                    str(value),
-                )
-
-
-elif isinstance(
-    accuracy,
-    (
-        int,
-        float,
-        np.number,
-    ),
-):
-
-    st.metric(
-        "Accuracy Score",
-        f"{float(accuracy):.2f}",
-    )
-
-
+        direction = "relatively stable"
 else:
+    direction = "uncertain"
 
-    st.info(
-        "Model accuracy information is not available "
-        "for this forecast."
+message = (
+    f"The selected model is **{model_name}**. The forecast is **{direction}** "
+    f"over the selected horizon. The projected average is approximately "
+    f"**{forecast_mean:,.2f}**."
+)
+if auto_best:
+    message += f" Historical holdout testing identified **{auto_best}** as the strongest available automatic model."
+if recent_change is not None:
+    message += f" The recent historical movement was approximately **{recent_change:+.2f}%** across the latest comparison window."
+
+st.markdown(f'<div class="insight-box">{message}</div>', unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------------
+# Model comparison
+# ------------------------------------------------------------------
+
+st.markdown('<div class="section-title">🏆 Model Comparison</div>', unsafe_allow_html=True)
+
+scores = result.get("model_scores", {})
+if scores:
+    rows = []
+    for name, metrics in scores.items():
+        rows.append(
+            {
+                "Model": name,
+                "MAE": metrics.get("mae"),
+                "RMSE": metrics.get("rmse"),
+                "MAPE %": metrics.get("mape"),
+                "R²": metrics.get("r2"),
+            }
+        )
+    comparison = pd.DataFrame(rows).sort_values("MAPE %", na_position="last")
+    st.dataframe(
+        comparison.style.format(
+            {
+                "MAE": "{:,.2f}",
+                "RMSE": "{:,.2f}",
+                "MAPE %": "{:,.2f}",
+                "R²": "{:,.3f}",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
     )
+    st.caption("Lower MAE/RMSE/MAPE generally indicates better historical holdout performance; R² is provided as additional context.")
+else:
+    st.info("The series is too short for a reliable model comparison.")
 
 
-# ============================================================
-# FORECAST TABLE
-# ============================================================
+# ------------------------------------------------------------------
+# Forecast KPIs
+# ------------------------------------------------------------------
 
-st.markdown(
-    '<div class="section-title">📋 Forecast Values</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="section-title">📊 Forecast Summary</div>', unsafe_allow_html=True)
 
-
-display_forecast = forecast_df.copy()
-
-
-display_forecast[
-    forecast_date_column
-] = (
-    display_forecast[
-        forecast_date_column
-    ].dt.strftime("%Y-%m-%d")
-)
+f1, f2, f3, f4 = st.columns(4)
+f1.metric("Forecast Points", f"{len(forecast):,}")
+f2.metric("First Forecast", f"{forecast['forecast'].iloc[0]:,.2f}")
+f3.metric("Final Forecast", f"{forecast['forecast'].iloc[-1]:,.2f}")
+f4.metric("Forecast Average", f"{forecast['forecast'].mean():,.2f}")
 
 
-st.dataframe(
-    display_forecast,
-    use_container_width=True,
-    hide_index=True,
-)
+# ------------------------------------------------------------------
+# Accuracy
+# ------------------------------------------------------------------
+
+st.markdown('<div class="section-title">🎯 Historical Backtest Accuracy</div>', unsafe_allow_html=True)
+
+accuracy = calculate_model_accuracy(prepared, date_column, metric_column)
+a1, a2, a3, a4 = st.columns(4)
+for col, label, key, suffix in [
+    (a1, "MAE", "mae", ""),
+    (a2, "RMSE", "rmse", ""),
+    (a3, "MAPE", "mape", "%"),
+    (a4, "R²", "r2", ""),
+]:
+    value = accuracy.get(key)
+    with col:
+        if value is None or not np.isfinite(value):
+            st.metric(label, "N/A")
+        else:
+            st.metric(label, f"{value:,.2f}{suffix}")
 
 
-# ============================================================
-# DOWNLOAD
-# ============================================================
+# ------------------------------------------------------------------
+# Forecast table + download
+# ------------------------------------------------------------------
 
-csv_data = forecast_df.to_csv(
-    index=False
-).encode("utf-8")
+st.markdown('<div class="section-title">📋 Forecast Values</div>', unsafe_allow_html=True)
 
+display_forecast = forecast.copy()
+display_forecast[forecast_date] = display_forecast[forecast_date].dt.strftime("%Y-%m-%d %H:%M")
+st.dataframe(display_forecast, use_container_width=True, hide_index=True)
 
+csv_data = forecast.to_csv(index=False).encode("utf-8")
 st.download_button(
     "⬇️ Download Forecast CSV",
     data=csv_data,
-    file_name="insightai_forecast.csv",
+    file_name="insightai_intelligent_forecast.csv",
     mime="text/csv",
     use_container_width=True,
 )
 
-
-# ============================================================
-# AUTOMATIC INTERPRETATION
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">🤖 Forecast Interpretation</div>',
-    unsafe_allow_html=True,
-)
-
-
-if not forecast_values.empty:
-
-    if np.isfinite(
-        forecast_change
-    ):
-
-        if forecast_change > 10:
-
-            st.success(
-                f"The forecast indicates an upward movement "
-                f"of approximately {forecast_change:.2f}% "
-                f"from the latest observed value to the "
-                f"end of the forecast horizon."
-            )
-
-        elif forecast_change < -10:
-
-            st.warning(
-                f"The forecast indicates a downward movement "
-                f"of approximately {abs(forecast_change):.2f}% "
-                f"from the latest observed value to the "
-                f"end of the forecast horizon."
-            )
-
-        else:
-
-            st.info(
-                f"The forecast indicates relatively stable "
-                f"movement, with an estimated change of "
-                f"{forecast_change:+.2f}% from the latest "
-                f"observed value."
-            )
-
-    st.caption(
-        "Forecasts are statistical/model-based estimates "
-        "and should be interpreted together with historical "
-        "patterns and business context."
-    )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.divider()
-
 st.caption(
-    "InsightAI • AI-Powered Data Analytics & "
-    "Decision Intelligence Platform"
+    "Prediction ranges are model-based uncertainty estimates, not guarantees. "
+    "Use the historical backtest metrics and business context when interpreting the forecast."
 )
