@@ -1,95 +1,59 @@
-"""Network/PCAP intelligence for InsightAI."""
+"""Network-aware analytics for packet DataFrames."""
 from __future__ import annotations
-
-from typing import Any
 import pandas as pd
 
-
-def _first_existing(df: pd.DataFrame, names: list[str]) -> str | None:
-    lookup = {str(c).lower(): str(c) for c in df.columns}
-    for name in names:
-        if name.lower() in lookup:
-            return lookup[name.lower()]
+def _col(df, names):
+    lower = {str(c).lower(): c for c in df.columns}
+    for n in names:
+        if n in lower:
+            return lower[n]
     return None
 
-
-def analyze_network_capture(df: pd.DataFrame, capture_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Create deterministic network metrics from common TShark columns."""
-    if df is None or df.empty:
-        return {"available": False, "reason": "No packets available."}
-
-    protocol_col = _first_existing(df, ["_ws.col.Protocol", "protocol", "ip.proto", "frame.protocols"])
-    src_col = _first_existing(df, ["ip.src", "ipv6.src", "eth.src"])
-    dst_col = _first_existing(df, ["ip.dst", "ipv6.dst", "eth.dst"])
-    length_col = _first_existing(df, ["frame.len", "length", "len"])
-    time_col = _first_existing(df, ["frame.time_epoch", "frame.time", "timestamp", "time"])
-    tcp_stream_col = _first_existing(df, ["tcp.stream"])
-    udp_stream_col = _first_existing(df, ["udp.stream"])
-
-    result: dict[str, Any] = {
-        "available": True,
-        "packet_count": int(len(df)),
-        "protocols": {},
-        "top_sources": {},
-        "top_destinations": {},
-        "total_bytes": None,
-        "duration_seconds": None,
-        "packets_per_second": None,
-        "bytes_per_second": None,
-        "unique_conversations": None,
-        "columns": {"protocol": protocol_col, "source": src_col, "destination": dst_col, "length": length_col, "time": time_col},
+def analyze_network_capture(df):
+    time_col = _col(df, ["frame_time", "frame.time", "timestamp", "time"])
+    len_col = _col(df, ["frame_len", "frame.len", "length", "len"])
+    packets = len(df)
+    total_bytes = int(pd.to_numeric(df[len_col], errors="coerce").fillna(0).sum()) if len_col else 0
+    duration = 0.0
+    if time_col:
+        t = pd.to_datetime(df[time_col], errors="coerce")
+        if t.notna().any():
+            duration = max(0.0, (t.max() - t.min()).total_seconds())
+    return {
+        "packet_count": packets,
+        "total_bytes": total_bytes,
+        "duration_seconds": duration,
+        "packets_per_second": packets / duration if duration else 0.0,
+        "bytes_per_second": total_bytes / duration if duration else 0.0,
     }
 
-    if capture_metadata:
-        result["capture_metadata"] = capture_metadata
+def protocol_distribution(df):
+    col = _col(df, ["protocol", "_ws.col.protocol", "frame_protocols", "ip_proto"])
+    if not col:
+        return pd.DataFrame()
+    return df[col].fillna("Unknown").astype(str).value_counts().rename_axis("Protocol").reset_index(name="Packets")
 
-    if protocol_col:
-        result["protocols"] = df[protocol_col].astype("string").fillna("Unknown").value_counts().head(20).to_dict()
+def top_endpoints(df, limit=15):
+    src = _col(df, ["ip_src", "ip.src", "src_ip", "source"])
+    dst = _col(df, ["ip_dst", "ip.dst", "dst_ip", "destination"])
+    if not src and not dst:
+        return pd.DataFrame()
+    parts = []
+    if src:
+        parts.append(df[src].fillna("Unknown").astype(str).value_counts().rename_axis("Endpoint").reset_index(name="Source Packets"))
+    if dst:
+        parts.append(df[dst].fillna("Unknown").astype(str).value_counts().rename_axis("Endpoint").reset_index(name="Destination Packets"))
+    result = parts[0]
+    for part in parts[1:]:
+        result = result.merge(part, on="Endpoint", how="outer")
+    return result.fillna(0).head(limit)
 
-    if src_col:
-        result["top_sources"] = df[src_col].astype("string").fillna("Unknown").value_counts().head(10).to_dict()
-
-    if dst_col:
-        result["top_destinations"] = df[dst_col].astype("string").fillna("Unknown").value_counts().head(10).to_dict()
-
-    if length_col:
-        lengths = pd.to_numeric(df[length_col], errors="coerce")
-        result["total_bytes"] = int(lengths.sum()) if lengths.notna().any() else None
-
-    if time_col:
-        times = pd.to_numeric(df[time_col], errors="coerce")
-        if times.notna().sum() >= 2:
-            duration = float(times.max() - times.min())
-            if duration >= 0:
-                result["duration_seconds"] = round(duration, 6)
-                if duration > 0:
-                    result["packets_per_second"] = round(len(df) / duration, 3)
-                    if result["total_bytes"] is not None:
-                        result["bytes_per_second"] = round(result["total_bytes"] / duration, 3)
-
-    if src_col and dst_col:
-        pairs = pd.DataFrame({"src": df[src_col].astype("string"), "dst": df[dst_col].astype("string")}).dropna()
-        result["unique_conversations"] = int(pairs.drop_duplicates().shape[0])
-
-    if tcp_stream_col or udp_stream_col:
-        stream_cols = [c for c in [tcp_stream_col, udp_stream_col] if c]
-        result["unique_streams"] = int(pd.concat([df[c].astype("string") for c in stream_cols]).nunique(dropna=True))
-
-    return result
-
-
-def network_summary_text(metrics: dict[str, Any]) -> str:
-    if not metrics.get("available"):
-        return "Network intelligence is not available for this dataset."
-    lines = [f"Packets: {metrics.get('packet_count', 0):,}"]
-    if metrics.get("total_bytes") is not None:
-        lines.append(f"Bytes: {metrics['total_bytes']:,}")
-    if metrics.get("duration_seconds") is not None:
-        lines.append(f"Duration: {metrics['duration_seconds']:.3f} seconds")
-    if metrics.get("packets_per_second") is not None:
-        lines.append(f"Packets/sec: {metrics['packets_per_second']:,.2f}")
-    if metrics.get("bytes_per_second") is not None:
-        lines.append(f"Bytes/sec: {metrics['bytes_per_second']:,.2f}")
-    if metrics.get("unique_conversations") is not None:
-        lines.append(f"Unique source/destination pairs: {metrics['unique_conversations']:,}")
-    return "\n".join(lines)
+def top_conversations(df, limit=15):
+    src = _col(df, ["ip_src", "ip.src", "src_ip"])
+    dst = _col(df, ["ip_dst", "ip.dst", "dst_ip"])
+    if not src or not dst:
+        return pd.DataFrame()
+    out = df.copy()
+    out["Source"] = out[src].fillna("Unknown").astype(str)
+    out["Destination"] = out[dst].fillna("Unknown").astype(str)
+    return out.groupby(["Source", "Destination"], as_index=False).size().rename(columns={"size": "Packets"}).sort_values("Packets", ascending=False).head(limit)
