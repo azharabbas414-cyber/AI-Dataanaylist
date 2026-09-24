@@ -927,14 +927,12 @@ def _render_workflow_sidebar():
         for key, icon, label in labels:
             if key == "network" and not _dataset_is_network():
                 continue
-            if unlocked.get(key):
-                # IMPORTANT: the entrypoint script itself is not a valid page-link
-                # target when st.navigation() is controlling routing. Use the
-                # registered StreamlitPage objects for every destination.
-                target_page = PAGE_OBJECTS[key]
-                st.page_link(target_page, label=f"{icon} {label}")
-            else:
-                st.markdown(f"<div style='padding:7px 8px; opacity:.42;'>🔒 {label}</div>", unsafe_allow_html=True)
+
+            # All workflow modules remain available from the sidebar.
+            # We keep the existing routing and page registration unchanged;
+            # this only removes the lock/disabled state from the UI.
+            target_page = PAGE_OBJECTS[key]
+            st.page_link(target_page, label=f"{icon} {label}")
 
         st.divider()
         done = sum(bool(v) for k, v in state.items() if k != "home")
