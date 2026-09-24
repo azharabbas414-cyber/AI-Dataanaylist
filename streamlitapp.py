@@ -4,6 +4,8 @@ import pandas as pd
 import streamlit as st
 
 from core.data_loader import load_dataset, get_dataset_info
+from core.dataset_intelligence import build_dataset_intelligence
+from core.remote_data import fetch_remote_dataset
 
 
 # ============================================================
@@ -36,6 +38,12 @@ if "dataset_info" not in st.session_state:
 
 if "capture_metadata" not in st.session_state:
     st.session_state.capture_metadata = None
+
+if "dataset_intelligence" not in st.session_state:
+    st.session_state.dataset_intelligence = None
+
+if "dataset_collection" not in st.session_state:
+    st.session_state.dataset_collection = {}
 
 
 # ============================================================
@@ -305,15 +313,43 @@ with st.sidebar:
         label="📄 Reports",
     )
 
+    st.page_link(
+        "pages/07_Network_Intelligence.py",
+        label="🌐 Network Intelligence",
+    )
+
     st.divider()
 
     if st.session_state.active_dataframe is not None:
 
         st.markdown("### 📌 Active Dataset")
 
-        st.caption(
-            st.session_state.active_dataset
-        )
+        if len(st.session_state.dataset_collection) > 1:
+            dataset_names = list(st.session_state.dataset_collection.keys())
+            current_name = st.session_state.get("active_dataset")
+            current_index = (
+                dataset_names.index(current_name)
+                if current_name in dataset_names
+                else 0
+            )
+            sidebar_selected = st.selectbox(
+                "Select active dataset",
+                dataset_names,
+                index=current_index,
+                key="sidebar_active_dataset",
+            )
+
+            if sidebar_selected != st.session_state.active_dataset:
+                item = st.session_state.dataset_collection[sidebar_selected]
+                st.session_state.active_dataset = sidebar_selected
+                st.session_state.active_dataframe = item["dataframe"]
+                st.session_state.active_source = item["source"]
+                st.session_state.dataset_info = item["info"]
+                st.session_state.capture_metadata = item["info"].get("capture_metadata")
+                st.session_state.dataset_intelligence = item["intelligence"]
+                st.rerun()
+        else:
+            st.caption(st.session_state.active_dataset)
 
         st.caption(
             f"{len(st.session_state.active_dataframe):,} "
@@ -380,7 +416,7 @@ workflow = [
         workflow_cols[0],
         "📂",
         "1. Select",
-        "Upload your dataset or select a dataset from the repository.",
+        "Upload one or more files or connect a public data URL.",
     ),
     (
         workflow_cols[1],
@@ -438,170 +474,146 @@ st.write("")
 st.html(
     """
     <div class="section-title">
-        📂 Select Your Data
+        📂 Bring Your Data to InsightAI
     </div>
 
     <div class="section-subtitle">
-        Upload a supported data file and InsightAI will
-        automatically detect the format and create a
-        dataset profile.
+        Upload one or more datasets, or fetch a public dataset directly
+        from Google Drive, Google Sheets or a web URL.
     </div>
     """
 )
 
 
 # ============================================================
-# TABS
+# DATA SOURCE TABS
 # ============================================================
 
 source_tab1, source_tab2 = st.tabs(
     [
-        "📚 Repository Datasets",
-        "⬆️ Upload New Dataset",
+        "⬆️ Upload Files",
+        "🔗 Google Drive / Web Link",
     ]
 )
 
 
+def _store_active_dataset(
+    name: str,
+    df: pd.DataFrame,
+    detected_type: str,
+    source: str,
+):
+    info = get_dataset_info(df)
+    capture_metadata = info.get("capture_metadata")
+
+    intelligence = build_dataset_intelligence(
+        df,
+        name,
+        detected_type,
+        capture_metadata,
+    )
+
+    st.session_state.dataset_collection[name] = {
+        "dataframe": df,
+        "info": info,
+        "detected_type": detected_type,
+        "source": source,
+        "intelligence": intelligence,
+    }
+
+    st.session_state.active_dataset = name
+    st.session_state.active_dataframe = df
+    st.session_state.active_source = source
+    st.session_state.dataset_info = info
+    st.session_state.capture_metadata = capture_metadata
+    st.session_state.dataset_intelligence = intelligence
+
+
 # ============================================================
-# LOCAL FILE WRAPPER
-# ============================================================
-
-class LocalUploadedFile:
-
-    def __init__(self, path: Path):
-
-        self.name = path.name
-
-        with open(path, "rb") as file:
-            self._bytes = file.read()
-
-    def getvalue(self):
-
-        return self._bytes
-
-
-# ============================================================
-# REPOSITORY DATASETS
+# MULTI-FILE UPLOAD
 # ============================================================
 
 with source_tab1:
 
-    data_folder = Path("data")
+    st.html(
+        """
+        <div class="info-box">
+            <b>📦 Multi-File Dataset Upload</b>
+            <br><br>
+            Upload multiple CSV, Excel, JSON, Parquet, TXT/TSV, ODS
+            or Wireshark PCAP/PCAPNG/CAP files in one operation.
+            <br><br>
+            Each file remains an independent dataset so you can switch
+            between them without changing the original files.
+        </div>
+        """
+    )
 
-    if data_folder.exists():
+    uploaded_files = st.file_uploader(
+        "Choose one or more datasets / Wireshark captures",
+        type=SUPPORTED_UPLOAD_TYPES,
+        accept_multiple_files=True,
+        key="multi_dataset_upload",
+        help="You can select multiple files at the same time.",
+    )
 
-        supported_files = [
-            file
-            for file in data_folder.iterdir()
-            if (
-                file.is_file()
-                and file.suffix.lower()
-                in [
-                    ".csv",
-                    ".xlsx",
-                    ".xls",
-                    ".json",
-                    ".parquet",
-                    ".txt",
-                    ".tsv",
-                    ".ods",
-                    ".pcap",
-                    ".pcapng",
-                    ".cap",
-                ]
-            )
-        ]
+    if uploaded_files:
+        total_mb = sum(
+            file.size for file in uploaded_files
+        ) / (1024 * 1024)
 
-    else:
-
-        supported_files = []
-
-
-    if not supported_files:
-
-        st.info(
-            "No repository datasets were found "
-            "in the data folder."
+        st.caption(
+            f"**{len(uploaded_files)} file(s) selected** • "
+            f"Total size: **{total_mb:.2f} MB**"
         )
 
-    else:
-
-        st.write(
-            f"**{len(supported_files)} datasets available**"
+        preview = pd.DataFrame(
+            [
+                {
+                    "File": file.name,
+                    "Size (MB)": round(file.size / (1024 * 1024), 2),
+                    "Extension": Path(file.name).suffix.lower(),
+                }
+                for file in uploaded_files
+            ]
         )
-
-        dataset_options = [
-            file.name
-            for file in supported_files
-        ]
-
-        selected_dataset = st.selectbox(
-            "Choose a dataset",
-            dataset_options,
-            key="repository_dataset_selector",
-        )
-
-        selected_path = (
-            data_folder / selected_dataset
-        )
+        st.dataframe(preview, use_container_width=True, hide_index=True)
 
         if st.button(
-            "📂 Load Selected Dataset",
+            "🚀 Load All Selected Files",
             type="primary",
             use_container_width=True,
-            key="load_repository_dataset",
+            key="load_multiple_files",
         ):
+            loaded = 0
+            errors = []
 
-            try:
+            with st.spinner("Loading and profiling selected datasets..."):
+                for file in uploaded_files:
+                    try:
+                        df, detected_type = load_dataset(file)
+                        _store_active_dataset(
+                            file.name,
+                            df,
+                            detected_type,
+                            f"Uploaded File • {detected_type}",
+                        )
+                        loaded += 1
+                    except Exception as exc:
+                        errors.append(f"{file.name}: {exc}")
 
-                local_file = LocalUploadedFile(
-                    selected_path
-                )
+            if loaded:
+                st.success(f"✓ {loaded} dataset(s) loaded successfully.")
 
-                with st.spinner(
-                    "Loading dataset..."
-                ):
+            for error in errors:
+                st.error(error)
 
-                    df, detected_type = load_dataset(
-                        local_file
-                    )
-
-                    info = get_dataset_info(df)
-
-                st.session_state.active_dataframe = df
-
-                st.session_state.active_dataset = (
-                    selected_dataset
-                )
-
-                st.session_state.active_source = (
-                    f"Repository • {detected_type}"
-                )
-
-                st.session_state.dataset_info = info
-
-                st.session_state.capture_metadata = (
-                    info.get("capture_metadata")
-                )
-
-                st.success(
-                    f"✓ {selected_dataset} "
-                    "loaded successfully."
-                )
-
+            if loaded:
                 st.rerun()
-
-            except Exception as exc:
-
-                st.error(
-                    "Unable to load dataset."
-                )
-
-                st.exception(exc)
 
 
 # ============================================================
-# UNIVERSAL UPLOAD
+# GOOGLE DRIVE / WEB LINK
 # ============================================================
 
 with source_tab2:
@@ -609,359 +621,104 @@ with source_tab2:
     st.html(
         """
         <div class="info-box">
-
-            <b>Universal Dataset Upload</b>
-
+            <b>🔗 Connect a Public Data Source</b>
             <br><br>
-
-            InsightAI automatically detects and processes:
-
+            Paste a public <b>Google Drive</b>, <b>Google Sheets</b> or
+            direct <b>web dataset URL</b>.
             <br><br>
-
-            📄 CSV &nbsp;&nbsp;
-            📊 Excel &nbsp;&nbsp;
-            🧾 JSON &nbsp;&nbsp;
-            🗂️ Parquet &nbsp;&nbsp;
-            📝 TXT / TSV &nbsp;&nbsp;
-            📑 ODS
-
+            Supported remote formats include CSV, Excel, JSON, Parquet,
+            ODS, TSV and other directly downloadable data files.
+            Webpages containing HTML tables can also be imported.
             <br><br>
-
-            🌐 <b>Wireshark:</b>
-            PCAP / PCAPNG / CAP
-
-            <br><br>
-
-            After upload, InsightAI automatically creates
-            a standardized dataset for analysis.
-
+            <b>Google Drive:</b> the file must be shared as
+            <i>Anyone with the link</i> for server-side fetching.
         </div>
         """
     )
 
-
-    uploaded_file = st.file_uploader(
-        "Choose a dataset or Wireshark capture",
-        type=SUPPORTED_UPLOAD_TYPES,
-        key="universal_dataset_upload",
+    remote_url = st.text_input(
+        "Google Drive / Google Sheets / Web Dataset URL",
+        placeholder="https://drive.google.com/... or https://example.com/data.csv",
+        key="remote_dataset_url",
     )
 
-
-    if uploaded_file is not None:
-
-        file_size_mb = (
-            uploaded_file.size
-            / (1024 * 1024)
-        )
-
-        st.caption(
-            f"File: **{uploaded_file.name}**  |  "
-            f"Size: **{file_size_mb:.2f} MB**"
-        )
-
-        try:
-
-            with st.spinner(
-                "Detecting file type and loading data..."
-            ):
-
-                df, detected_type = load_dataset(
-                    uploaded_file
-                )
-
-                info = get_dataset_info(df)
-
-
-            # ------------------------------------------------
-            # SAVE ACTIVE DATASET
-            # ------------------------------------------------
-
-            st.session_state.active_dataframe = df
-
-            st.session_state.active_dataset = (
-                uploaded_file.name
-            )
-
-            st.session_state.active_source = (
-                f"Uploaded File • {detected_type}"
-            )
-
-            st.session_state.dataset_info = info
-
-            st.session_state.capture_metadata = (
-                info.get("capture_metadata")
-            )
-
-
-            # ------------------------------------------------
-            # SUCCESS
-            # ------------------------------------------------
-
-            st.success(
-                f"✓ **{detected_type}** detected "
-                "and loaded successfully."
-            )
-
-
-            # ------------------------------------------------
-            # PCAP SUMMARY
-            # ------------------------------------------------
-
-            if (
-                detected_type.startswith(
-                    "Wireshark"
-                )
-                and info.get(
-                    "capture_metadata"
-                )
-            ):
-
-                capture = info[
-                    "capture_metadata"
-                ]
-
-                st.markdown(
-                    "### 🌐 Wireshark Capture Summary"
-                )
-
-                wc1, wc2, wc3, wc4 = st.columns(4)
-
-                wc1.metric(
-                    "Packets Loaded",
-                    f"{capture['packets_loaded']:,}",
-                )
-
-                wc2.metric(
-                    "Total Bytes",
-                    f"{capture['total_bytes']:,}",
-                )
-
-                wc3.metric(
-                    "Duration",
-                    f"{capture['duration_seconds']:.2f} sec",
-                )
-
-                wc4.metric(
-                    "Packets / Sec",
-                    f"{capture['packets_per_second']:,.2f}",
-                )
-
-                bytes_per_second = capture[
-                    "bytes_per_second"
-                ]
-
-                st.info(
-                    f"Average throughput: "
-                    f"**{bytes_per_second / (1024 * 1024):,.2f} MB/s**"
-                )
-
-                if (
-                    capture["packets_loaded"]
-                    >= capture["max_packets"]
-                ):
-
-                    st.warning(
-                        f"The capture contains more packets "
-                        f"than the current processing limit of "
-                        f"{capture['max_packets']:,}. "
-                        "Only the first packets were loaded "
-                        "into the analytics engine."
+    if st.button(
+        "🌐 Fetch Dataset",
+        type="primary",
+        use_container_width=True,
+        key="fetch_remote_dataset",
+    ):
+        if not remote_url.strip():
+            st.warning("Please paste a Google Drive or web URL first.")
+        else:
+            try:
+                with st.spinner("Fetching remote data and creating a dataset profile..."):
+                    remote_file = fetch_remote_dataset(remote_url.strip())
+                    df, detected_type = load_dataset(remote_file)
+                    _store_active_dataset(
+                        remote_file.name,
+                        df,
+                        detected_type,
+                        f"Remote URL • {detected_type}",
                     )
 
-
-            # ------------------------------------------------
-            # DATASET SUMMARY
-            # ------------------------------------------------
-
-            st.markdown(
-                "### 📊 Dataset Summary"
-            )
-
-            c1, c2, c3, c4 = st.columns(4)
-
-            c1.metric(
-                "Rows",
-                f"{info['rows']:,}",
-            )
-
-            c2.metric(
-                "Columns",
-                f"{info['columns']:,}",
-            )
-
-            c3.metric(
-                "Missing Values",
-                f"{info['missing_values']:,}",
-            )
-
-            c4.metric(
-                "Duplicate Rows",
-                f"{info['duplicate_rows']:,}",
-            )
-
-
-            # ------------------------------------------------
-            # DETECTED TYPES
-            # ------------------------------------------------
-
-            st.markdown(
-                "### 🔍 Automatically Detected Data Types"
-            )
-
-            type_cols = st.columns(5)
-
-            type_cols[0].metric(
-                "🔢 Numeric",
-                len(
-                    info["column_types"][
-                        "numeric"
-                    ]
-                ),
-            )
-
-            type_cols[1].metric(
-                "🔤 Categorical",
-                len(
-                    info["column_types"][
-                        "categorical"
-                    ]
-                ),
-            )
-
-            type_cols[2].metric(
-                "📅 Date / Time",
-                len(
-                    info["column_types"][
-                        "datetime"
-                    ]
-                ),
-            )
-
-            type_cols[3].metric(
-                "🔘 Boolean",
-                len(
-                    info["column_types"][
-                        "boolean"
-                    ]
-                ),
-            )
-
-            type_cols[4].metric(
-                "📝 Text",
-                len(
-                    info["column_types"][
-                        "text"
-                    ]
-                ),
-            )
-
-
-            # ------------------------------------------------
-            # COLUMN CLASSIFICATION
-            # ------------------------------------------------
-
-            with st.expander(
-                "🔍 View detected column classifications"
-            ):
-
-                detected_types_df = pd.DataFrame(
-                    {
-                        "Data Type": [
-                            "Numeric",
-                            "Categorical",
-                            "Date / Time",
-                            "Boolean",
-                            "Text",
-                        ],
-
-                        "Columns": [
-                            ", ".join(
-                                map(
-                                    str,
-                                    info[
-                                        "column_types"
-                                    ][
-                                        "numeric"
-                                    ],
-                                )
-                            ),
-
-                            ", ".join(
-                                map(
-                                    str,
-                                    info[
-                                        "column_types"
-                                    ][
-                                        "categorical"
-                                    ],
-                                )
-                            ),
-
-                            ", ".join(
-                                map(
-                                    str,
-                                    info[
-                                        "column_types"
-                                    ][
-                                        "datetime"
-                                    ],
-                                )
-                            ),
-
-                            ", ".join(
-                                map(
-                                    str,
-                                    info[
-                                        "column_types"
-                                    ][
-                                        "boolean"
-                                    ],
-                                )
-                            ),
-
-                            ", ".join(
-                                map(
-                                    str,
-                                    info[
-                                        "column_types"
-                                    ][
-                                        "text"
-                                    ],
-                                )
-                            ),
-                        ],
-                    }
+                st.success(
+                    f"✓ {remote_file.name} fetched and loaded successfully."
                 )
+                st.rerun()
 
-                st.dataframe(
-                    detected_types_df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-
-            # ------------------------------------------------
-            # DATA PREVIEW
-            # ------------------------------------------------
-
-            st.markdown(
-                "### 👀 Data Preview"
-            )
-
-            st.dataframe(
-                df.head(10),
-                use_container_width=True,
-                height=350,
-            )
+            except Exception as exc:
+                st.error("Unable to fetch this remote dataset.")
+                st.exception(exc)
 
 
-        except Exception as exc:
+# ============================================================
+# LOADED DATASETS
+# ============================================================
 
-            st.error(
-                "❌ Unable to load this file."
-            )
+if st.session_state.dataset_collection:
+    st.divider()
+    st.markdown("### 🗃️ Loaded Datasets")
 
-            st.exception(exc)
+    collection_rows = []
+    for name, item in st.session_state.dataset_collection.items():
+        frame = item["dataframe"]
+        collection_rows.append(
+            {
+                "Dataset": name,
+                "Source": item["source"],
+                "Type": item["detected_type"],
+                "Rows": len(frame),
+                "Columns": len(frame.columns),
+            }
+        )
+
+    st.dataframe(
+        pd.DataFrame(collection_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if len(st.session_state.dataset_collection) > 1:
+        names = list(st.session_state.dataset_collection.keys())
+        current = st.session_state.get("active_dataset")
+        index = names.index(current) if current in names else 0
+        selected = st.selectbox(
+            "Active dataset",
+            names,
+            index=index,
+            key="home_active_dataset_selector",
+        )
+
+        if selected != st.session_state.active_dataset:
+            item = st.session_state.dataset_collection[selected]
+            st.session_state.active_dataset = selected
+            st.session_state.active_dataframe = item["dataframe"]
+            st.session_state.active_source = item["source"]
+            st.session_state.dataset_info = item["info"]
+            st.session_state.capture_metadata = item["info"].get("capture_metadata")
+            st.session_state.dataset_intelligence = item["intelligence"]
+            st.rerun()
 
 
 # ============================================================
@@ -984,6 +741,14 @@ if st.session_state.active_dataframe is not None:
         )
 
         st.session_state.dataset_info = info
+
+    if st.session_state.dataset_intelligence is None:
+        st.session_state.dataset_intelligence = build_dataset_intelligence(
+            active_df,
+            st.session_state.active_dataset,
+            st.session_state.active_source,
+            info.get("capture_metadata") if info else None,
+        )
 
 
     st.divider()
@@ -1024,6 +789,10 @@ if st.session_state.active_dataframe is not None:
         </div>
         """
     )
+
+    intelligence = st.session_state.dataset_intelligence or {}
+    dataset_label = intelligence.get("metadata", {}).get("dataset_type_label", "Dataset")
+    st.caption(f"🧠 InsightAI detected this as: **{dataset_label}**")
 
 
     # --------------------------------------------------------
@@ -1080,84 +849,6 @@ if st.session_state.active_dataframe is not None:
         st.switch_page(
             "pages/00_Data_Cleaning.py"
         )
-
-
-# ============================================================
-# REPOSITORY SUMMARY
-# ============================================================
-
-st.divider()
-
-
-st.html(
-    """
-    <div class="section-title">
-        📚 Repository Datasets
-    </div>
-
-    <div class="section-subtitle">
-        Datasets currently available inside the InsightAI repository.
-    </div>
-    """
-)
-
-
-if supported_files:
-
-    summary_data = []
-
-    for file in supported_files:
-
-        try:
-
-            local_file = LocalUploadedFile(
-                file
-            )
-
-            temp_df, temp_type = (
-                load_dataset(
-                    local_file
-                )
-            )
-
-            summary_data.append(
-                {
-                    "Dataset": file.name,
-                    "Type": temp_type,
-                    "Rows": len(temp_df),
-                    "Columns": len(
-                        temp_df.columns
-                    ),
-                }
-            )
-
-        except Exception:
-
-            summary_data.append(
-                {
-                    "Dataset": file.name,
-                    "Type": "Unable to read",
-                    "Rows": "-",
-                    "Columns": "-",
-                }
-            )
-
-
-    summary_df = pd.DataFrame(
-        summary_data
-    )
-
-    st.dataframe(
-        summary_df,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-else:
-
-    st.info(
-        "No repository datasets available."
-    )
 
 
 # ============================================================
