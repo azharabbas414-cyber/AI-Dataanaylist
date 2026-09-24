@@ -932,7 +932,7 @@ def _render_workflow_sidebar():
             # We keep the existing routing and page registration unchanged;
             # this only removes the lock/disabled state from the UI.
             target_page = PAGE_OBJECTS[key]
-            st.page_link(target_page, label=f"{icon} {label}")
+            st.page_link(target_page, label=label)
 
         st.divider()
         done = sum(bool(v) for k, v in state.items() if k != "home")
