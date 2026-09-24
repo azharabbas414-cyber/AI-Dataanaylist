@@ -188,16 +188,41 @@ pending_question = st.session_state.pop(
 )
 
 st.markdown("### 💬 Ask InsightAI")
+st.caption(
+    "Ask a question about the active dataset. InsightAI will use the "
+    "calculated evidence and your previous questions to investigate it."
+)
 
-if pending_question:
-    question = pending_question
-else:
-    question = st.chat_input(
-        "Ask anything about your active dataset..."
+# Use a normal visible text box instead of st.chat_input.
+# st.chat_input is pinned to the bottom of the browser window, which can
+# make it look like there is no question box in the main workspace.
+question = st.text_area(
+    "Your question",
+    value=pending_question,
+    placeholder=(
+        "Example: What are the most important findings in this dataset?"
+    ),
+    height=100,
+    key="ai_question_input",
+)
+
+ask_col, clear_col = st.columns([5, 1])
+with ask_col:
+    ask_question = st.button(
+        "🚀 Ask InsightAI",
+        type="primary",
+        use_container_width=True,
     )
+with clear_col:
+    if st.button(
+        "Clear",
+        use_container_width=True,
+        help="Clear the question box.",
+    ):
+        st.session_state.ai_question_input = ""
+        st.rerun()
 
-# Chat input returns None when the user has not submitted anything.
-if question:
+if ask_question and question:
     question = question.strip()
 
     if question:
