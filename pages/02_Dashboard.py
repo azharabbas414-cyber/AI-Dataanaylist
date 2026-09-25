@@ -280,6 +280,250 @@ with snapshot_col2:
     )
 
 
+
+# ============================================================
+# CUSTOM VISUALIZATION BUILDER
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">🎨 Custom Visualization Builder</div>',
+    unsafe_allow_html=True,
+)
+
+st.info(
+    "The standard dashboard sections below are automatic. Use this builder when you want to choose the graph type yourself. "
+    "It supports comparison, trend, composition, distribution, correlation and hierarchy charts."
+)
+
+all_columns = [str(c) for c in df.columns]
+optional_color_columns = ["None"] + categorical_columns
+chart_types = [
+    "Bar",
+    "Line",
+    "Area",
+    "Pie",
+    "Donut",
+    "Scatter",
+    "Histogram",
+    "Box",
+    "Violin",
+    "Strip",
+    "Heatmap",
+    "Treemap",
+    "Sunburst",
+    "Funnel",
+]
+
+builder_top = st.columns([1.25, 1.25, 1.0, 1.0])
+with builder_top[0]:
+    custom_chart_type = st.selectbox(
+        "Graph Type",
+        chart_types,
+        key="dashboard_custom_chart_type",
+        help="Choose the visualization instead of using only the dashboard's fixed charts.",
+    )
+with builder_top[1]:
+    custom_title = st.text_input(
+        "Chart Title",
+        value="InsightAI Custom Chart",
+        key="dashboard_custom_chart_title",
+    )
+with builder_top[2]:
+    custom_color = st.selectbox(
+        "Color / Group",
+        optional_color_columns,
+        key="dashboard_custom_color",
+    )
+with builder_top[3]:
+    custom_aggregation = st.selectbox(
+        "Aggregation",
+        ["Sum", "Mean", "Median", "Min", "Max", "Count"],
+        key="dashboard_custom_aggregation",
+        help="Used for charts that aggregate a metric by a dimension.",
+    )
+
+# Field selectors change slightly according to the selected chart.
+if custom_chart_type in {"Bar", "Line", "Area", "Funnel"}:
+    c1, c2 = st.columns(2)
+    with c1:
+        custom_x = st.selectbox("Category / X-axis", all_columns, key="dashboard_custom_x")
+    with c2:
+        custom_y_options = ["Row Count"] + numeric_columns
+        custom_y = st.selectbox("Metric / Y-axis", custom_y_options, key="dashboard_custom_y")
+
+elif custom_chart_type in {"Pie", "Donut"}:
+    c1, c2 = st.columns(2)
+    with c1:
+        custom_x = st.selectbox("Category", all_columns, key="dashboard_custom_x")
+    with c2:
+        custom_y_options = ["Row Count"] + numeric_columns
+        custom_y = st.selectbox("Value", custom_y_options, key="dashboard_custom_y")
+
+elif custom_chart_type == "Scatter":
+    c1, c2 = st.columns(2)
+    with c1:
+        custom_x = st.selectbox("X-axis (numeric)", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
+    with c2:
+        custom_y = st.selectbox("Y-axis (numeric)", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
+
+elif custom_chart_type == "Histogram":
+    custom_x = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
+    custom_y = None
+
+elif custom_chart_type in {"Box", "Violin", "Strip"}:
+    c1, c2 = st.columns(2)
+    with c1:
+        custom_x = st.selectbox("Category (optional)", ["None"] + categorical_columns, key="dashboard_custom_x")
+    with c2:
+        custom_y = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
+
+elif custom_chart_type == "Heatmap":
+    custom_x = None
+    custom_y = None
+
+else:  # Treemap / Sunburst
+    hierarchy_options = ["None"] + categorical_columns
+    h1, h2, h3 = st.columns(3)
+    with h1:
+        level_1 = st.selectbox("Level 1", hierarchy_options, key="dashboard_custom_level_1")
+    with h2:
+        level_2 = st.selectbox("Level 2", hierarchy_options, key="dashboard_custom_level_2")
+    with h3:
+        level_3 = st.selectbox("Level 3", hierarchy_options, key="dashboard_custom_level_3")
+    custom_x = level_1
+    custom_y_options = ["Row Count"] + numeric_columns
+    custom_y = st.selectbox("Size / Value", custom_y_options, key="dashboard_custom_y")
+
+if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
+    try:
+        fig = None
+        color_arg = None if custom_color == "None" else custom_color
+
+        if custom_chart_type == "Heatmap":
+            if len(numeric_columns) < 2:
+                raise ValueError("Heatmap requires at least two numeric columns.")
+            matrix = df[numeric_columns].apply(pd.to_numeric, errors="coerce").corr()
+            fig = px.imshow(matrix, text_auto=".2f", aspect="auto", title=custom_title)
+
+        elif custom_chart_type == "Scatter":
+            if not custom_x or not custom_y:
+                raise ValueError("Scatter requires two numeric fields.")
+            plot_df = df[[custom_x, custom_y] + ([custom_color] if color_arg else [])].copy()
+            plot_df[custom_x] = pd.to_numeric(plot_df[custom_x], errors="coerce")
+            plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
+            plot_df = plot_df.dropna(subset=[custom_x, custom_y])
+            if plot_df.empty:
+                raise ValueError("No valid numeric rows are available for the selected scatter plot.")
+            fig = px.scatter(plot_df, x=custom_x, y=custom_y, color=color_arg, title=custom_title, trendline="ols" if len(plot_df) >= 3 else None)
+
+        elif custom_chart_type == "Histogram":
+            if not custom_x:
+                raise ValueError("Histogram requires a numeric field.")
+            values = pd.to_numeric(df[custom_x], errors="coerce")
+            plot_df = pd.DataFrame({custom_x: values}).dropna()
+            if plot_df.empty:
+                raise ValueError("No valid numeric values are available for the histogram.")
+            fig = px.histogram(plot_df, x=custom_x, nbins=30, marginal="box", title=custom_title)
+
+        elif custom_chart_type in {"Box", "Violin", "Strip"}:
+            if not custom_y:
+                raise ValueError(f"{custom_chart_type} requires a numeric field.")
+            cols = [custom_y]
+            if custom_x and custom_x != "None":
+                cols.insert(0, custom_x)
+            if color_arg and color_arg not in cols:
+                cols.append(color_arg)
+            plot_df = df[cols].copy()
+            plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
+            plot_df = plot_df.dropna(subset=[custom_y])
+            if plot_df.empty:
+                raise ValueError("No valid values are available for this distribution chart.")
+            if custom_chart_type == "Box":
+                fig = px.box(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, title=custom_title, points="outliers")
+            elif custom_chart_type == "Violin":
+                fig = px.violin(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, box=True, points=False, title=custom_title)
+            else:
+                fig = px.strip(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, title=custom_title)
+
+        elif custom_chart_type in {"Treemap", "Sunburst"}:
+            levels = [level for level in [level_1, level_2, level_3] if level != "None"]
+            levels = list(dict.fromkeys(levels))
+            if not levels:
+                raise ValueError(f"{custom_chart_type} requires at least one category level.")
+            cols = levels + ([] if custom_y == "Row Count" else [custom_y])
+            work = df[cols].copy()
+            for level in levels:
+                work[level] = work[level].fillna("Missing").astype(str)
+            if custom_y == "Row Count":
+                work["__value__"] = 1
+                value_field = "__value__"
+            else:
+                work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                work = work.dropna(subset=[custom_y])
+                value_field = custom_y
+            if work.empty:
+                raise ValueError("No valid rows are available for this hierarchy chart.")
+            group_cols = levels
+            grouped = work.groupby(group_cols, as_index=False)[value_field].agg(custom_aggregation.lower())
+            if custom_chart_type == "Treemap":
+                fig = px.treemap(grouped, path=levels, values=value_field, color=value_field, title=custom_title)
+            else:
+                fig = px.sunburst(grouped, path=levels, values=value_field, color=value_field, title=custom_title)
+
+        else:
+            if not custom_x:
+                raise ValueError("A category / X-axis field is required.")
+            cols = [custom_x]
+            if custom_y != "Row Count":
+                cols.append(custom_y)
+            if color_arg and color_arg not in cols:
+                cols.append(color_arg)
+            work = df[cols].copy()
+            work[custom_x] = work[custom_x].fillna("Missing").astype(str)
+
+            if custom_y == "Row Count":
+                grouped = work.groupby(custom_x, as_index=False).size().rename(columns={"size": "Row Count"})
+                value_field = "Row Count"
+            else:
+                work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                work = work.dropna(subset=[custom_y])
+                if work.empty:
+                    raise ValueError("No valid numeric values are available for this chart.")
+                group_cols = [custom_x] + ([color_arg] if color_arg else [])
+                grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
+                value_field = custom_y
+
+            if custom_chart_type == "Bar":
+                fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
+            elif custom_chart_type == "Line":
+                fig = px.line(grouped, x=custom_x, y=value_field, color=color_arg, markers=True, title=custom_title)
+            elif custom_chart_type == "Area":
+                fig = px.area(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
+            elif custom_chart_type == "Funnel":
+                fig = px.funnel(grouped, x=value_field, y=custom_x, color=color_arg, title=custom_title)
+            elif custom_chart_type in {"Pie", "Donut"}:
+                if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
+                    raise ValueError("Pie and donut charts require non-negative values.")
+                fig = px.pie(grouped, names=custom_x, values=value_field, title=custom_title, hole=0.45 if custom_chart_type == "Donut" else 0)
+            else:
+                raise ValueError("Unsupported chart type.")
+
+        fig.update_layout(height=520, margin=dict(l=20, r=20, t=70, b=20))
+        st.session_state["dashboard_custom_chart_figure"] = fig
+        st.session_state["dashboard_custom_chart_title_value"] = custom_title
+
+    except Exception as exc:
+        st.error(f"Unable to generate the selected visualization: {exc}")
+
+if st.session_state.get("dashboard_custom_chart_figure") is not None:
+    st.plotly_chart(
+        st.session_state["dashboard_custom_chart_figure"],
+        use_container_width=True,
+        key="dashboard_custom_chart_output",
+    )
+    st.caption("Custom visualization generated directly from the active dataset. Change the graph type or fields and generate again.")
+
+
 # ============================================================
 # PIE CHARTS
 # ============================================================
