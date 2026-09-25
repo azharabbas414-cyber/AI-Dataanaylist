@@ -352,12 +352,29 @@ if custom_chart_type in {"Bar", "Line", "Area", "Funnel"}:
         custom_y = st.selectbox("Metric / Y-axis", custom_y_options, key="dashboard_custom_y")
 
 elif custom_chart_type in {"Pie", "Donut"}:
+    # Pie/Donut charts represent a part-to-whole relationship.
+    # Use a categorical field for the slices and a numeric field (or Row Count)
+    # for the slice size. Avoid allowing the same field to be selected twice.
+    pie_category_options = categorical_columns if categorical_columns else all_columns
+    pie_value_options = ["Row Count"] + numeric_columns
+
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("Category", all_columns, key="dashboard_custom_x")
+        custom_x = st.selectbox(
+            "Category",
+            pie_category_options,
+            key="dashboard_custom_x",
+            help="Each category becomes a slice of the pie/donut.",
+        )
     with c2:
-        custom_y_options = ["Row Count"] + numeric_columns
-        custom_y = st.selectbox("Value", custom_y_options, key="dashboard_custom_y")
+        custom_y = st.selectbox(
+            "Value",
+            pie_value_options,
+            key="dashboard_custom_y",
+            help="Use Row Count for number of records, or a numeric field for Sum/Mean/etc.",
+        )
+    if custom_color != "None":
+        st.caption("Color / Group is not used for Pie/Donut charts; the Category field controls the slices.")
 
 elif custom_chart_type == "Scatter":
     c1, c2 = st.columns(2)
@@ -473,40 +490,79 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
         else:
             if not custom_x:
                 raise ValueError("A category / X-axis field is required.")
-            cols = [custom_x]
-            if custom_y != "Row Count":
-                cols.append(custom_y)
-            if color_arg and color_arg not in cols:
-                cols.append(color_arg)
+            # Build a unique column list. Selecting the same field as both
+            # category and value creates duplicate DataFrame columns and can
+            # make pandas return a DataFrame instead of a Series.
+            cols = []
+            for col in [custom_x, custom_y if custom_y != "Row Count" else None, color_arg]:
+                if col and col not in cols:
+                    cols.append(col)
+
             work = df[cols].copy()
             work[custom_x] = work[custom_x].fillna("Missing").astype(str)
 
-            if custom_y == "Row Count":
-                grouped = work.groupby(custom_x, as_index=False).size().rename(columns={"size": "Row Count"})
-                value_field = "Row Count"
-            else:
-                work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                work = work.dropna(subset=[custom_y])
-                if work.empty:
-                    raise ValueError("No valid numeric values are available for this chart.")
-                group_cols = [custom_x] + ([color_arg] if color_arg else [])
-                grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
-                value_field = custom_y
+            if custom_chart_type in {"Pie", "Donut"}:
+                # Pie/Donut is intentionally category + one measure only.
+                if custom_y == custom_x:
+                    raise ValueError("Category and Value must be different fields.")
 
-            if custom_chart_type == "Bar":
-                fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
-            elif custom_chart_type == "Line":
-                fig = px.line(grouped, x=custom_x, y=value_field, color=color_arg, markers=True, title=custom_title)
-            elif custom_chart_type == "Area":
-                fig = px.area(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
-            elif custom_chart_type == "Funnel":
-                fig = px.funnel(grouped, x=value_field, y=custom_x, color=color_arg, title=custom_title)
-            elif custom_chart_type in {"Pie", "Donut"}:
+                if custom_y == "Row Count":
+                    grouped = (
+                        work.groupby(custom_x, as_index=False)
+                        .size()
+                        .rename(columns={"size": "Row Count"})
+                    )
+                    value_field = "Row Count"
+                else:
+                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                    work = work.dropna(subset=[custom_y])
+                    if work.empty:
+                        raise ValueError("No valid numeric values are available for this chart.")
+                    grouped = (
+                        work.groupby(custom_x, as_index=False)[custom_y]
+                        .agg(custom_aggregation.lower())
+                    )
+                    value_field = custom_y
+
                 if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
                     raise ValueError("Pie and donut charts require non-negative values.")
-                fig = px.pie(grouped, names=custom_x, values=value_field, title=custom_title, hole=0.45 if custom_chart_type == "Donut" else 0)
+
+                fig = px.pie(
+                    grouped,
+                    names=custom_x,
+                    values=value_field,
+                    title=custom_title,
+                    hole=0.45 if custom_chart_type == "Donut" else 0,
+                )
+
             else:
-                raise ValueError("Unsupported chart type.")
+                if custom_y == "Row Count":
+                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
+                    grouped = (
+                        work.groupby(group_cols, as_index=False)
+                        .size()
+                        .rename(columns={"size": "Row Count"})
+                    )
+                    value_field = "Row Count"
+                else:
+                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                    work = work.dropna(subset=[custom_y])
+                    if work.empty:
+                        raise ValueError("No valid numeric values are available for this chart.")
+                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
+                    grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
+                    value_field = custom_y
+
+                if custom_chart_type == "Bar":
+                    fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
+                elif custom_chart_type == "Line":
+                    fig = px.line(grouped, x=custom_x, y=value_field, color=color_arg, markers=True, title=custom_title)
+                elif custom_chart_type == "Area":
+                    fig = px.area(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
+                elif custom_chart_type == "Funnel":
+                    fig = px.funnel(grouped, x=value_field, y=custom_x, color=color_arg, title=custom_title)
+                else:
+                    raise ValueError("Unsupported chart type.")
 
         fig.update_layout(height=520, margin=dict(l=20, r=20, t=70, b=20))
         st.session_state["dashboard_custom_chart_figure"] = fig
