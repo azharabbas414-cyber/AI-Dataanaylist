@@ -1,8 +1,15 @@
 """InsightAI forecasting engine.
 
-The forecasting layer combines simple baselines, Holt-Winters exponential
-smoothing and a lag-aware Random Forest. Models are evaluated with a
-chronological holdout and the best available model is selected automatically.
+The forecasting layer converts raw observations into a regular time series,
+backtests multiple models, selects a model when requested, and produces a
+future forecast with a practical uncertainty range.
+
+The important product concept is:
+    Raw data -> choose time grain -> aggregate a metric -> forecast the series.
+
+This makes the module usable for transactional data such as telecom billing,
+CDRs, sales and network KPI data instead of requiring the source dataset to
+already be a clean time series.
 """
 
 from __future__ import annotations
@@ -20,6 +27,19 @@ except Exception:  # pragma: no cover - optional runtime dependency
     Holt = None
 
 
+TIME_GRAIN_OPTIONS = {
+    "Auto": None,
+    "Hourly": "h",
+    "Daily": "D",
+    "Weekly": "W",
+    "Monthly": "ME",
+    "Quarterly": "QE",
+    "Yearly": "YE",
+}
+
+AGGREGATION_OPTIONS = ["Sum", "Mean", "Median", "Min", "Max", "Count"]
+
+
 def detect_datetime_columns(df: pd.DataFrame) -> list[str]:
     """Return columns that contain enough valid datetime values."""
     result: list[str] = []
@@ -32,7 +52,8 @@ def detect_datetime_columns(df: pd.DataFrame) -> list[str]:
 
         name = str(column).lower()
         looks_like_time = any(
-            token in name for token in ("date", "time", "timestamp", "datetime", "month", "year")
+            token in name
+            for token in ("date", "time", "timestamp", "datetime", "month", "year")
         )
         if not looks_like_time:
             continue
@@ -44,12 +65,63 @@ def detect_datetime_columns(df: pd.DataFrame) -> list[str]:
     return result
 
 
+def _normalise_grain(grain: str | None) -> str | None:
+    if grain is None:
+        return None
+    text = str(grain).strip().lower()
+    aliases = {
+        "auto": None,
+        "hour": "h",
+        "hourly": "h",
+        "day": "D",
+        "daily": "D",
+        "week": "W",
+        "weekly": "W",
+        "month": "ME",
+        "monthly": "ME",
+        "quarter": "QE",
+        "quarterly": "QE",
+        "year": "YE",
+        "yearly": "YE",
+    }
+    return aliases.get(text, grain)
+
+
+def _aggregate_series(values: pd.Series, aggregation: str) -> pd.Series:
+    aggregation = str(aggregation or "Sum").strip().lower()
+    if aggregation == "sum":
+        return values.resample("D").sum()  # replaced by caller when needed
+    if aggregation == "mean":
+        return values.resample("D").mean()
+    if aggregation == "median":
+        return values.resample("D").median()
+    if aggregation == "min":
+        return values.resample("D").min()
+    if aggregation == "max":
+        return values.resample("D").max()
+    if aggregation == "count":
+        return values.resample("D").count()
+    raise ValueError(f"Unsupported aggregation: {aggregation}")
+
+
 def prepare_time_series(
     df: pd.DataFrame,
     date_column: str,
     value_column: str,
+    time_grain: str | None = "Auto",
+    aggregation: str = "Sum",
 ) -> pd.DataFrame:
-    """Convert a raw dataset into one numeric observation per timestamp."""
+    """Convert raw records into one regular observation per selected period.
+
+    Parameters
+    ----------
+    time_grain:
+        Auto, Hourly, Daily, Weekly, Monthly, Quarterly or Yearly. Auto keeps
+        the observed timestamps; the UI should normally use an explicit grain
+        for transaction-level data.
+    aggregation:
+        Sum, Mean, Median, Min, Max or Count.
+    """
     if date_column not in df.columns:
         raise ValueError(f"Date column '{date_column}' was not found.")
     if value_column not in df.columns:
@@ -58,18 +130,55 @@ def prepare_time_series(
     prepared = df[[date_column, value_column]].copy()
     prepared[date_column] = pd.to_datetime(prepared[date_column], errors="coerce")
     prepared[value_column] = pd.to_numeric(prepared[value_column], errors="coerce")
-    prepared = prepared.dropna(subset=[date_column, value_column])
+    prepared = prepared.dropna(subset=[date_column])
+
+    # Count is useful for CDR/billing rows even when the selected field is not
+    # numeric. Other aggregations require a numeric metric.
+    if str(aggregation).lower() != "count":
+        prepared = prepared.dropna(subset=[value_column])
 
     if prepared.empty:
         return prepared
 
-    prepared = (
-        prepared.groupby(date_column, as_index=False)[value_column]
-        .sum()
-        .sort_values(date_column)
-        .reset_index(drop=True)
-    )
-    return prepared
+    prepared = prepared.sort_values(date_column).reset_index(drop=True)
+    grain = _normalise_grain(time_grain)
+
+    if grain is None:
+        # Auto mode keeps the original timestamp granularity but combines
+        # duplicate timestamps. This is backward compatible with the earlier
+        # engine and is most appropriate when the data is already periodic.
+        if str(aggregation).lower() == "count":
+            grouped = prepared.groupby(date_column, as_index=False).size()
+            grouped = grouped.rename(columns={"size": value_column})
+        else:
+            grouped = (
+                prepared.groupby(date_column, as_index=False)[value_column]
+                .agg(str(aggregation).lower())
+            )
+        return grouped.sort_values(date_column).reset_index(drop=True)
+
+    indexed = prepared.set_index(date_column)
+    numeric = indexed[value_column]
+    agg_name = str(aggregation).lower()
+
+    if agg_name == "count":
+        series = numeric.resample(grain).count()
+    elif agg_name == "sum":
+        series = numeric.resample(grain).sum()
+    elif agg_name == "mean":
+        series = numeric.resample(grain).mean()
+    elif agg_name == "median":
+        series = numeric.resample(grain).median()
+    elif agg_name == "min":
+        series = numeric.resample(grain).min()
+    elif agg_name == "max":
+        series = numeric.resample(grain).max()
+    else:
+        raise ValueError(f"Unsupported aggregation: {aggregation}")
+
+    series = series.dropna()
+    result = series.rename(value_column).reset_index()
+    return result.sort_values(date_column).reset_index(drop=True)
 
 
 def _infer_frequency(dates: pd.Series) -> tuple[str | None, pd.Timedelta]:
@@ -86,7 +195,7 @@ def _infer_frequency(dates: pd.Series) -> tuple[str | None, pd.Timedelta]:
 
 def _seasonal_period(frequency: str | None, step: pd.Timedelta) -> int:
     if frequency:
-        f = frequency.upper()
+        f = str(frequency).upper()
         if f.startswith("H") or "HOUR" in f:
             return 24
         if f.startswith("D") or "DAY" in f:
@@ -101,6 +210,8 @@ def _seasonal_period(frequency: str | None, step: pd.Timedelta) -> int:
             return 1
 
     days = step.total_seconds() / 86400
+    if 0.03 <= days <= 0.06:
+        return 24
     if 0.75 <= days <= 1.25:
         return 7
     if 6 <= days <= 8:
@@ -112,14 +223,15 @@ def _seasonal_period(frequency: str | None, step: pd.Timedelta) -> int:
     return 1
 
 
-def _future_dates(last_date: pd.Timestamp, horizon: int, frequency: str | None, step: pd.Timedelta) -> pd.DatetimeIndex:
+def _future_dates(
+    last_date: pd.Timestamp,
+    horizon: int,
+    frequency: str | None,
+    step: pd.Timedelta,
+) -> pd.DatetimeIndex:
     if frequency:
         try:
-            return pd.date_range(
-                start=last_date,
-                periods=horizon + 1,
-                freq=frequency,
-            )[1:]
+            return pd.date_range(start=last_date, periods=horizon + 1, freq=frequency)[1:]
         except Exception:
             pass
 
@@ -137,7 +249,10 @@ def _holt_forecast(values: np.ndarray, horizon: int, season: int) -> np.ndarray:
     if ExponentialSmoothing is None or len(values) < 8:
         if Holt is None or len(values) < 5:
             raise ValueError("Statsmodels smoothing is unavailable or the series is too short.")
-        return np.asarray(Holt(values, damped_trend=True).fit(optimized=True).forecast(horizon), dtype=float)
+        return np.asarray(
+            Holt(values, damped_trend=True).fit(optimized=True).forecast(horizon),
+            dtype=float,
+        )
 
     if season > 1 and len(values) >= max(2 * season, 12):
         model = ExponentialSmoothing(
@@ -160,10 +275,25 @@ def _holt_forecast(values: np.ndarray, horizon: int, season: int) -> np.ndarray:
     return np.asarray(fitted.forecast(horizon), dtype=float)
 
 
-def _rf_features(values: np.ndarray, dates: pd.DatetimeIndex, season: int) -> tuple[pd.DataFrame, np.ndarray]:
+def _rf_features(
+    values: np.ndarray,
+    dates: pd.DatetimeIndex,
+    season: int,
+) -> tuple[pd.DataFrame, np.ndarray]:
     rows = []
     targets = []
-    lags = sorted(set([1, 2, 3, season, min(7, max(1, season)), min(14, max(1, season * 2))]))
+    lags = sorted(
+        set(
+            [
+                1,
+                2,
+                3,
+                season,
+                min(7, max(1, season)),
+                min(14, max(1, season * 2)),
+            ]
+        )
+    )
     max_lag = max(lags)
 
     for i in range(max_lag, len(values)):
@@ -175,15 +305,20 @@ def _rf_features(values: np.ndarray, dates: pd.DatetimeIndex, season: int) -> tu
         }
         for lag in lags:
             row[f"lag_{lag}"] = values[i - lag]
-        row["roll_mean_3"] = float(np.mean(values[max(0, i - 3):i]))
-        row["roll_mean_7"] = float(np.mean(values[max(0, i - 7):i]))
+        row["roll_mean_3"] = float(np.mean(values[max(0, i - 3) : i]))
+        row["roll_mean_7"] = float(np.mean(values[max(0, i - 7) : i]))
         rows.append(row)
         targets.append(values[i])
 
     return pd.DataFrame(rows), np.asarray(targets, dtype=float)
 
 
-def _rf_recursive_forecast(values: np.ndarray, dates: pd.DatetimeIndex, future_dates: pd.DatetimeIndex, season: int) -> np.ndarray:
+def _rf_recursive_forecast(
+    values: np.ndarray,
+    dates: pd.DatetimeIndex,
+    future_dates: pd.DatetimeIndex,
+    season: int,
+) -> np.ndarray:
     X, y = _rf_features(values, dates, season)
     if len(X) < 8:
         raise ValueError("Not enough history for the lag-based model.")
@@ -198,9 +333,20 @@ def _rf_recursive_forecast(values: np.ndarray, dates: pd.DatetimeIndex, future_d
 
     history = list(values.astype(float))
     predictions: list[float] = []
-    lags = sorted(set([1, 2, 3, season, min(7, max(1, season)), min(14, max(1, season * 2))]))
+    lags = sorted(
+        set(
+            [
+                1,
+                2,
+                3,
+                season,
+                min(7, max(1, season)),
+                min(14, max(1, season * 2)),
+            ]
+        )
+    )
 
-    for offset, date in enumerate(future_dates):
+    for date in future_dates:
         i = len(history)
         row = {
             "trend": i,
@@ -224,22 +370,34 @@ def _metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float | Non
     predicted = np.asarray(predicted, dtype=float)
     error = actual - predicted
     mae = float(np.mean(np.abs(error)))
-    rmse = float(np.sqrt(np.mean(error ** 2)))
+    rmse = float(np.sqrt(np.mean(error**2)))
     nonzero = actual != 0
-    mape = float(np.mean(np.abs(error[nonzero] / actual[nonzero])) * 100) if nonzero.any() else None
+    mape = (
+        float(np.mean(np.abs(error[nonzero] / actual[nonzero])) * 100)
+        if nonzero.any()
+        else None
+    )
     ss_tot = float(np.sum((actual - actual.mean()) ** 2))
-    ss_res = float(np.sum(error ** 2))
+    ss_res = float(np.sum(error**2))
     r2 = float(1 - ss_res / ss_tot) if ss_tot else None
     return {"mae": mae, "rmse": rmse, "mape": mape, "r2": r2}
 
 
-def _evaluate_models(prepared: pd.DataFrame, date_column: str, value_column: str, season: int) -> tuple[dict[str, dict[str, float | None]], str, np.ndarray]:
+def _evaluate_models(
+    prepared: pd.DataFrame,
+    date_column: str,
+    value_column: str,
+    season: int,
+) -> tuple[dict[str, dict[str, float | None]], str, np.ndarray]:
     values = prepared[value_column].to_numpy(dtype=float)
     dates = pd.DatetimeIndex(prepared[date_column])
     if len(values) < 10:
         return {}, "Seasonal Naive", _seasonal_naive(values, 1, season)
 
     test_size = max(3, min(14, int(round(len(values) * 0.20))))
+    if len(values) - test_size < 5:
+        test_size = max(1, len(values) - 5)
+
     train_values = values[:-test_size]
     test_values = values[-test_size:]
     train_dates = dates[:-test_size]
@@ -283,10 +441,18 @@ def build_forecast(
     value_column: str,
     forecast_periods: int = 7,
     model_name: str = "Auto",
+    time_grain: str | None = "Auto",
+    aggregation: str = "Sum",
 ) -> dict[str, Any]:
-    prepared = prepare_time_series(df, date_column, value_column)
+    prepared = prepare_time_series(
+        df,
+        date_column,
+        value_column,
+        time_grain=time_grain,
+        aggregation=aggregation,
+    )
     if len(prepared) < 5:
-        raise ValueError("At least 5 valid time-series observations are required.")
+        raise ValueError("At least 5 valid time-series observations are required after aggregation.")
     if forecast_periods < 1:
         raise ValueError("Forecast horizon must be at least 1.")
 
@@ -296,7 +462,12 @@ def build_forecast(
     dates = pd.DatetimeIndex(prepared[date_column])
     future_dates = _future_dates(dates[-1], forecast_periods, frequency, step)
 
-    backtest_scores, auto_best, _ = _evaluate_models(prepared, date_column, value_column, season)
+    backtest_scores, auto_best, _ = _evaluate_models(
+        prepared,
+        date_column,
+        value_column,
+        season,
+    )
     selected = auto_best if model_name == "Auto" else model_name
 
     if selected == "Seasonal Naive":
@@ -309,15 +480,14 @@ def build_forecast(
         raise ValueError(f"Unknown forecasting model: {selected}")
 
     predictions = np.asarray(predictions, dtype=float)
-    predictions = np.maximum(predictions, 0) if np.nanmin(values) >= 0 else predictions
+    if np.nanmin(values) >= 0:
+        predictions = np.maximum(predictions, 0)
 
-    # Use the selected model's holdout residuals when available for a practical
-    # uncertainty band. Otherwise fall back to historical residual volatility.
     residual_std = None
     if selected in backtest_scores:
-        m = backtest_scores[selected]
-        if m.get("rmse") is not None:
-            residual_std = float(m["rmse"])
+        rmse = backtest_scores[selected].get("rmse")
+        if rmse is not None:
+            residual_std = float(rmse)
     if residual_std is None:
         residual_std = float(np.std(np.diff(values))) if len(values) > 2 else float(np.std(values))
     if not np.isfinite(residual_std) or residual_std <= 0:
@@ -338,14 +508,17 @@ def build_forecast(
         }
     )
 
-    recent = values[-min(7, len(values)):]
+    recent = values[-min(7, len(values)) :]
     recent_mean = float(np.mean(recent))
+    base = values[-min(8, len(values))]
     final_change = ((predictions[-1] - values[-1]) / abs(values[-1]) * 100) if values[-1] != 0 else None
-    recent_change = ((values[-1] - values[-min(8, len(values))]) / abs(values[-min(8, len(values))]) * 100) if len(values) > 1 and values[-min(8, len(values))] != 0 else None
+    recent_change = ((values[-1] - base) / abs(base) * 100) if len(values) > 1 and base != 0 else None
 
     diagnostics = {
         "observations": int(len(values)),
         "frequency": frequency or str(step),
+        "time_grain": time_grain or "Auto",
+        "aggregation": aggregation,
         "seasonal_period": int(season),
         "latest_value": float(values[-1]),
         "historical_mean": float(np.mean(values)),
@@ -366,6 +539,8 @@ def build_forecast(
         "date_column": date_column,
         "value_column": value_column,
         "frequency": frequency,
+        "time_grain": time_grain or "Auto",
+        "aggregation": aggregation,
         "seasonal_period": season,
         "confidence_level": 95,
         "diagnostics": diagnostics,
@@ -377,9 +552,17 @@ def calculate_model_accuracy(
     df: pd.DataFrame,
     date_column: str,
     value_column: str,
+    time_grain: str | None = "Auto",
+    aggregation: str = "Sum",
 ) -> dict[str, float | None]:
     """Return chronological holdout metrics for the automatically selected model."""
-    prepared = prepare_time_series(df, date_column, value_column)
+    prepared = prepare_time_series(
+        df,
+        date_column,
+        value_column,
+        time_grain=time_grain,
+        aggregation=aggregation,
+    )
     if len(prepared) < 10:
         return {"mae": None, "rmse": None, "mape": None, "r2": None}
 
