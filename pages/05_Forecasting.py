@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.forecasting import (
+    AGGREGATION_OPTIONS,
+    TIME_GRAIN_OPTIONS,
     build_forecast,
     calculate_model_accuracy,
     detect_datetime_columns,
@@ -40,6 +42,22 @@ st.markdown(
         background: rgba(100,116,139,.045);
         line-height: 1.6;
     }
+    .concept-card {
+        padding: 18px;
+        border-radius: 16px;
+        border: 1px solid rgba(100,116,139,.18);
+        background: rgba(100,116,139,.035);
+        min-height: 150px;
+    }
+    .concept-card h4 { margin: 0 0 8px; }
+    .concept-card p { margin: 0; opacity: .78; line-height: 1.55; }
+    .example-box {
+        padding: 16px 18px;
+        border-radius: 14px;
+        border-left: 4px solid rgba(99,102,241,.65);
+        background: rgba(99,102,241,.06);
+        line-height: 1.65;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -65,7 +83,57 @@ st.markdown(
     f"""
     <div class="forecast-hero">
         <h1>🔮 Forecasting Intelligence</h1>
-        <p>Discover trend, seasonality and future movement in <b>{dataset_name}</b> — with automatic model selection and uncertainty ranges.</p>
+        <p>Predict the future of a metric from its historical time pattern — for example, monthly telecom revenue, daily data traffic, hourly bandwidth, or weekly orders.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ------------------------------------------------------------------
+# Explain the concept before asking the user to configure a model.
+# ------------------------------------------------------------------
+
+st.markdown('<div class="section-title">❓ What does Forecasting do?</div>', unsafe_allow_html=True)
+
+concepts = st.columns(3)
+with concepts[0]:
+    st.markdown(
+        """
+        <div class="concept-card">
+            <h4>1️⃣ Learn from history</h4>
+            <p>InsightAI looks at how a selected metric changed over time. It can use sales, billing, traffic, calls, revenue, users, or any other measurable value.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with concepts[1]:
+    st.markdown(
+        """
+        <div class="concept-card">
+            <h4>2️⃣ Find the pattern</h4>
+            <p>The engine checks trend and recurring behaviour, then backtests available models against historical data before choosing an automatic model.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with concepts[2]:
+    st.markdown(
+        """
+        <div class="concept-card">
+            <h4>3️⃣ Estimate the future</h4>
+            <p>The result is a future series plus an uncertainty range. The forecast is an estimate, not a guarantee, so historical accuracy should always be reviewed.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown(
+    """
+    <div class="example-box">
+        <b>Telecom example:</b> If your dataset contains <b>Billing_Date</b> and <b>Total_Bill</b>, choose Billing_Date → Monthly → Total_Bill → Sum. InsightAI then creates a monthly billing history and forecasts the next few months.<br>
+        <b>CDR example:</b> If every row is a call, choose Timestamp → Daily → Row Count. The forecast then estimates the number of calls per future day.<br>
+        <b>Network example:</b> If you have hourly throughput, choose Timestamp → Hourly → Throughput → Mean to estimate future average throughput.
     </div>
     """,
     unsafe_allow_html=True,
@@ -93,114 +161,210 @@ if not date_columns:
     st.info("Add a Date, Time, Timestamp, Month or similar field to use forecasting.")
     st.stop()
 
-if not numeric_columns:
-    st.warning("No suitable numeric metric was found for forecasting.")
-    st.stop()
-
 
 # ------------------------------------------------------------------
-# Configuration
+# Forecast setup
 # ------------------------------------------------------------------
 
-st.markdown('<div class="section-title">⚙️ Forecast Setup</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">⚙️ Build Your Forecast</div>', unsafe_allow_html=True)
 
-c1, c2, c3, c4 = st.columns([1.35, 1.35, 1, 1.2])
+with st.expander("📘 How to choose these fields", expanded=True):
+    st.markdown(
+        """
+        **Date / Time** = when the measurement happened.
 
-with c1:
-    date_column = st.selectbox("Date / Time", date_columns, key="forecast_date_column_v2")
+        **Metric** = what you want to predict in the future.
 
-with c2:
-    metric_column = st.selectbox("Metric", numeric_columns, key="forecast_metric_column_v2")
+        **Time Grain** = the period of the forecast. This is very important for raw transaction data. A CDR file may contain thousands of individual calls, but you normally forecast **calls per day** or **calls per hour**, not each individual row.
 
-with c3:
-    horizon = st.selectbox("Future periods", [7, 14, 30, 60, 90], index=2, key="forecast_horizon_v2")
-
-with c4:
-    model_choice = st.selectbox(
-        "Forecast model",
-        ["Auto", "Holt-Winters", "Random Forest", "Seasonal Naive"],
-        key="forecast_model_choice_v2",
-        help="Auto evaluates the available models on a chronological holdout and selects the strongest historical fit.",
+        **Aggregation** = how multiple records inside one period are combined:
+        - **Sum** → revenue, billing amount, traffic volume, number of MB/GB, sales
+        - **Mean** → average throughput, latency, temperature, price
+        - **Count** → number of calls, sessions, tickets, orders
+        - **Median** → typical value when extreme values should have less influence
+        """
     )
 
 
+c1, c2, c3 = st.columns(3)
+with c1:
+    date_column = st.selectbox("1. Date / Time", date_columns, key="forecast_date_column_v3")
+
+with c2:
+    metric_options = ["Row Count"] + numeric_columns
+    metric_column = st.selectbox(
+        "2. What do you want to forecast?",
+        metric_options,
+        key="forecast_metric_column_v3",
+        help="Choose Row Count to forecast the number of records per period, such as calls or sessions.",
+    )
+
+with c3:
+    time_grain_label = st.selectbox(
+        "3. Time Grain",
+        list(TIME_GRAIN_OPTIONS.keys()),
+        index=4,
+        key="forecast_time_grain_v3",
+        help="Monthly is a common choice for billing. Daily is common for CDRs and sales. Hourly is common for network traffic.",
+    )
+
+
+grain_code = TIME_GRAIN_OPTIONS[time_grain_label]
+
+if metric_column == "Row Count":
+    working_df = df.copy()
+    working_df["__insightai_row_count__"] = 1
+    value_column = "__insightai_row_count__"
+    display_metric = "Number of Records"
+else:
+    working_df = df.copy()
+    value_column = metric_column
+    display_metric = str(metric_column)
+
+c4, c5, c6 = st.columns(3)
+with c4:
+    aggregation = st.selectbox(
+        "4. Aggregation",
+        AGGREGATION_OPTIONS,
+        index=0,
+        key="forecast_aggregation_v3",
+        help="How records in each time period are combined before forecasting.",
+    )
+
+with c5:
+    if time_grain_label == "Hourly":
+        horizon_options = [6, 12, 24, 48, 72, 168]
+    elif time_grain_label == "Daily":
+        horizon_options = [7, 14, 30, 60, 90]
+    elif time_grain_label == "Weekly":
+        horizon_options = [4, 8, 12, 26, 52]
+    elif time_grain_label == "Monthly":
+        horizon_options = [3, 6, 12, 18, 24]
+    elif time_grain_label == "Quarterly":
+        horizon_options = [2, 4, 8, 12]
+    elif time_grain_label == "Yearly":
+        horizon_options = [1, 2, 3, 5]
+    else:
+        horizon_options = [7, 14, 30, 60, 90]
+
+    horizon = st.selectbox(
+        "5. Future Periods",
+        horizon_options,
+        index=min(2, len(horizon_options) - 1),
+        key="forecast_horizon_v3",
+    )
+
+with c6:
+    model_choice = st.selectbox(
+        "6. Forecast Model",
+        ["Auto", "Holt-Winters", "Random Forest", "Seasonal Naive"],
+        key="forecast_model_choice_v3",
+        help="Auto backtests the available models and selects the strongest historical fit.",
+    )
+
+
+# Prepare a preview before the user runs the full forecast.
 try:
-    prepared = prepare_time_series(df, date_column, metric_column)
+    prepared_preview = prepare_time_series(
+        working_df,
+        date_column,
+        value_column,
+        time_grain=grain_code,
+        aggregation=aggregation,
+    )
 except Exception as exc:
-    st.error(f"Unable to prepare the time series: {exc}")
+    st.error(f"Unable to prepare the selected time series: {exc}")
     st.stop()
 
-if len(prepared) < 5:
-    st.warning("At least 5 valid time-series observations are required.")
-    st.stop()
 
-latest_value = float(prepared[metric_column].iloc[-1])
-first_value = float(prepared[metric_column].iloc[0])
+if len(prepared_preview) < 5:
+    st.warning(
+        f"Only {len(prepared_preview)} time periods are available after aggregation. "
+        "At least 5 are required; 12+ periods are preferable for a useful forecast."
+    )
+else:
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Historical Periods", f"{len(prepared_preview):,}")
+    p2.metric("First Period", str(prepared_preview[date_column].iloc[0]))
+    p3.metric("Last Period", str(prepared_preview[date_column].iloc[-1]))
+    p4.metric("History Avg", f"{prepared_preview[value_column].mean():,.2f}")
+
+    if len(prepared_preview) < 12:
+        st.info("💡 The forecast can run, but a longer history will generally make trend/seasonality evaluation more informative.")
+
+
+# Show the exact series InsightAI is going to forecast. This removes the
+# biggest source of confusion when the source dataset contains transactions.
+with st.expander("🔎 Preview the actual series that will be forecast", expanded=False):
+    st.dataframe(prepared_preview.tail(30), use_container_width=True, hide_index=True)
+    st.caption(
+        f"InsightAI is forecasting **{display_metric}** at **{time_grain_label}** grain using **{aggregation}** aggregation."
+    )
 
 
 # ------------------------------------------------------------------
-# Historical KPI cards
+# Generate forecast
 # ------------------------------------------------------------------
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Observations", f"{len(prepared):,}")
-k2.metric("Latest", f"{latest_value:,.2f}")
-k3.metric("Average", f"{prepared[metric_column].mean():,.2f}")
-k4.metric("Minimum", f"{prepared[metric_column].min():,.2f}")
-k5.metric("Maximum", f"{prepared[metric_column].max():,.2f}")
+config_signature = (
+    str(st.session_state.get("active_dataset")),
+    date_column,
+    value_column,
+    time_grain_label,
+    aggregation,
+    int(horizon),
+    model_choice,
+)
 
+if st.session_state.get("forecast_config_signature_v3") != config_signature:
+    st.session_state["forecast_result_v3"] = None
 
-# ------------------------------------------------------------------
-# Generate
-# ------------------------------------------------------------------
-
-if st.button("🚀 Generate Intelligent Forecast", type="primary", use_container_width=True):
-    st.session_state["forecast_result_v2"] = None
-    with st.spinner("Testing forecasting patterns and building the prediction..."):
+if st.button("🚀 Generate Forecast", type="primary", use_container_width=True, key="generate_forecast_v3"):
+    st.session_state["forecast_result_v3"] = None
+    with st.spinner("Preparing the time series, backtesting models and forecasting the future..."):
         try:
-            st.session_state["forecast_result_v2"] = build_forecast(
-                prepared,
+            st.session_state["forecast_result_v3"] = build_forecast(
+                working_df,
                 date_column,
-                metric_column,
+                value_column,
                 forecast_periods=int(horizon),
                 model_name=model_choice,
+                time_grain=grain_code,
+                aggregation=aggregation,
             )
+            st.session_state["forecast_config_signature_v3"] = config_signature
         except Exception as exc:
             st.error(f"Forecast model could not be built: {exc}")
             st.exception(exc)
 
-result = st.session_state.get("forecast_result_v2")
+result = st.session_state.get("forecast_result_v3")
 
 if result is None:
-    st.info("Choose your fields and click **Generate Intelligent Forecast** to begin.")
+    st.info("Complete the six selections above and click **Generate Forecast**. The preview shows exactly what InsightAI will forecast.")
     st.stop()
 
 forecast = result["forecast"].copy()
 forecast_date = date_column
 forecast_value = "forecast"
+model_name = result["model_name"]
+auto_best = result.get("auto_best_model", model_name)
+diagnostics = result["diagnostics"]
 
 
 # ------------------------------------------------------------------
 # Model / diagnostics summary
 # ------------------------------------------------------------------
 
-model_name = result["model_name"]
-auto_best = result.get("auto_best_model", model_name)
-diagnostics = result["diagnostics"]
-
 st.markdown('<div class="section-title">🧠 Forecast Intelligence</div>', unsafe_allow_html=True)
 
-s1, s2, s3, s4 = st.columns(4)
+s1, s2, s3, s4, s5 = st.columns(5)
 s1.metric("Selected Model", model_name)
-s2.metric("Detected Frequency", str(result.get("frequency") or "Irregular"))
-s3.metric("Seasonal Pattern", f"{result.get('seasonal_period', 1)} periods")
+s2.metric("Time Grain", time_grain_label)
+s3.metric("Aggregation", aggregation)
+s4.metric("Seasonal Pattern", f"{result.get('seasonal_period', 1)} periods")
 
 final_change = diagnostics.get("final_change_pct")
-with s4:
-    st.metric(
-        "End vs Latest",
-        f"{final_change:+.2f}%" if final_change is not None else "N/A",
-    )
+s5.metric("End vs Latest", f"{final_change:+.2f}%" if final_change is not None else "N/A")
 
 
 # ------------------------------------------------------------------
@@ -213,8 +377,8 @@ fig = go.Figure()
 
 fig.add_trace(
     go.Scatter(
-        x=prepared[date_column],
-        y=prepared[metric_column],
+        x=prepared_preview[date_column],
+        y=prepared_preview[value_column],
         mode="lines+markers",
         name="Historical",
         line=dict(width=2.5),
@@ -263,7 +427,7 @@ fig.update_layout(
     hovermode="x unified",
     legend=dict(orientation="h", y=1.05),
     xaxis_title="Date / Time",
-    yaxis_title=str(metric_column),
+    yaxis_title=display_metric,
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -290,8 +454,8 @@ else:
 
 message = (
     f"The selected model is **{model_name}**. The forecast is **{direction}** "
-    f"over the selected horizon. The projected average is approximately "
-    f"**{forecast_mean:,.2f}**."
+    f"over the next **{horizon} {time_grain_label.lower()} periods**. "
+    f"The projected average is approximately **{forecast_mean:,.2f}**."
 )
 if auto_best:
     message += f" Historical holdout testing identified **{auto_best}** as the strongest available automatic model."
@@ -333,7 +497,7 @@ if scores:
         use_container_width=True,
         hide_index=True,
     )
-    st.caption("Lower MAE/RMSE/MAPE generally indicates better historical holdout performance; R² is provided as additional context.")
+    st.caption("MAE, RMSE and MAPE measure historical prediction error on a chronological holdout. Lower error is generally better. R² is additional context, not a guarantee of future performance.")
 else:
     st.info("The series is too short for a reliable model comparison.")
 
@@ -357,7 +521,13 @@ f4.metric("Forecast Average", f"{forecast['forecast'].mean():,.2f}")
 
 st.markdown('<div class="section-title">🎯 Historical Backtest Accuracy</div>', unsafe_allow_html=True)
 
-accuracy = calculate_model_accuracy(prepared, date_column, metric_column)
+accuracy = calculate_model_accuracy(
+    working_df,
+    date_column,
+    value_column,
+    time_grain=grain_code,
+    aggregation=aggregation,
+)
 a1, a2, a3, a4 = st.columns(4)
 for col, label, key, suffix in [
     (a1, "MAE", "mae", ""),
@@ -394,5 +564,5 @@ st.download_button(
 
 st.caption(
     "Prediction ranges are model-based uncertainty estimates, not guarantees. "
-    "Use the historical backtest metrics and business context when interpreting the forecast."
+    "For business use, compare the backtest accuracy with the cost of being wrong and review the historical series before acting on the forecast."
 )
