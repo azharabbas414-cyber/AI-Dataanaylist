@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from core.calculated_metrics import run_calculated_metric_query
+from core.performance import aggregate as performance_aggregate, total as performance_total
 
 
 def _norm(value: Any) -> str:
@@ -198,14 +199,16 @@ def query_dataframe(df: pd.DataFrame, question: str) -> dict[str, Any]:
     direction, n = _ranking_request(question)
     if direction and metric and group:
         ascending = direction == "bottom"
-        grouped = df.groupby(group, dropna=False)[metric].sum().sort_values(ascending=ascending).head(n)
-        records = [{group: idx, f"total_{metric}": val} for idx, val in grouped.items()]
+        agg_df, engine_used = performance_aggregate(df, group, metric, "sum", sort_desc=not ascending, limit=n)
+        records = agg_df.to_dict(orient="records")
+        records = [{group: row[group], f"total_{metric}": row["value"]} for row in records]
         result.update(
             handled=True,
             intent="ranking",
             results=records,
             rank_direction=direction,
             rank_limit=n,
+            engine=engine_used,
             direct_answer=f"Here are the {direction} {n} {group} values ranked by total {metric}.",
         )
         return result
@@ -222,13 +225,13 @@ def query_dataframe(df: pd.DataFrame, question: str) -> dict[str, Any]:
 
         grouped = None
         if group and group in df.columns:
-            grouped = df.groupby(group, dropna=False)[metric].sum().sort_values(ascending=not wants_max).head(10)
+            grouped_df, engine_used = performance_aggregate(df, group, metric, "sum", sort_desc=wants_max, limit=10)
 
         row_records = rows.head(10).to_dict(orient="records")
         group_records = []
-        if grouped is not None:
-            for idx, value in grouped.items():
-                group_records.append({group: idx, f"total_{metric}": value})
+        if grouped_df is not None:
+            for row in grouped_df.to_dict(orient="records"):
+                group_records.append({group: row[group], f"total_{metric}": row["value"]})
 
         direct = f"The {'maximum' if wants_max else 'minimum'} {metric} is {_fmt_number(extreme_value)}."
         if group_records:
@@ -236,35 +239,35 @@ def query_dataframe(df: pd.DataFrame, question: str) -> dict[str, Any]:
             direct += f" The {group} with the {'highest' if wants_max else 'lowest'} total {metric} is {top_group.get(group)}, at {_fmt_number(top_group.get(f'total_{metric}'))}."
 
         result.update(handled=True, intent="extreme", extreme_value=float(extreme_value),
-                      matching_rows=row_records, grouped_totals=group_records, direct_answer=direct)
+                      matching_rows=row_records, grouped_totals=group_records, engine=(engine_used if group else "pandas"), direct_answer=direct)
         return result
 
     if metric and group:
         if any(x in q for x in ["total", "sum", "overall"]):
-            grouped = df.groupby(group, dropna=False)[metric].sum().sort_values(ascending=False)
-            records = [{group: idx, f"total_{metric}": val} for idx, val in grouped.head(20).items()]
+            grouped_df, engine_used = performance_aggregate(df, group, metric, "sum", sort_desc=True, limit=20)
+            records = [{group: row[group], f"total_{metric}": row["value"]} for row in grouped_df.to_dict(orient="records")]
             result.update(handled=True, intent="group_sum", results=records,
-                          direct_answer=f"Total {metric} by {group} calculated successfully.")
+                          engine=engine_used, direct_answer=f"Total {metric} by {group} calculated successfully.")
             return result
 
         if any(x in q for x in ["average", "avg", "mean"]):
-            grouped = df.groupby(group, dropna=False)[metric].mean().sort_values(ascending=False)
-            records = [{group: idx, f"average_{metric}": val} for idx, val in grouped.head(20).items()]
+            grouped_df, engine_used = performance_aggregate(df, group, metric, "mean", sort_desc=True, limit=20)
+            records = [{group: row[group], f"average_{metric}": row["value"]} for row in grouped_df.to_dict(orient="records")]
             result.update(handled=True, intent="group_mean", results=records,
-                          direct_answer=f"Average {metric} by {group} calculated successfully.")
+                          engine=engine_used, direct_answer=f"Average {metric} by {group} calculated successfully.")
             return result
 
         if "median" in q:
-            grouped = df.groupby(group, dropna=False)[metric].median().sort_values(ascending=False)
-            records = [{group: idx, f"median_{metric}": val} for idx, val in grouped.head(20).items()]
+            grouped_df, engine_used = performance_aggregate(df, group, metric, "median", sort_desc=True, limit=20)
+            records = [{group: row[group], f"median_{metric}": row["value"]} for row in grouped_df.to_dict(orient="records")]
             result.update(handled=True, intent="group_median", results=records,
-                          direct_answer=f"Median {metric} by {group} calculated successfully.")
+                          engine=engine_used, direct_answer=f"Median {metric} by {group} calculated successfully.")
             return result
 
     if metric:
         if any(x in q for x in ["total", "sum"]):
-            value = df[metric].sum()
-            result.update(handled=True, intent="sum", value=float(value),
+            value, engine_used = performance_total(df, metric)
+            result.update(handled=True, intent="sum", value=float(value), engine=engine_used,
                           direct_answer=f"The total {metric} is {_fmt_number(value)}.")
             return result
         if any(x in q for x in ["average", "avg", "mean"]):
