@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from core.performance import aggregate as performance_aggregate
+
 
 def _norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
@@ -238,17 +240,17 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
         ratio_grouped = ratio_frame.groupby(keys, dropna=False)
         series = ratio_grouped["__numerator__"].sum().div(ratio_grouped["__denominator__"].sum().replace(0, pd.NA))
     else:
-        grouped_metric = grouped[definition["name"]]
-        if aggregation == "mean":
-            series = grouped_metric.mean()
-        elif aggregation == "median":
-            series = grouped_metric.median()
-        elif aggregation == "count":
-            series = grouped_metric.count()
-        else:
-            series = grouped_metric.sum()
+        # Use the shared performance engine for large datasets while keeping
+        # identical result semantics for smaller datasets.
+        result_df, engine_used = performance_aggregate(
+            work, keys, definition["name"], aggregation
+        )
+        series = None
 
-    result_df = series.reset_index(name="value")
+    if definition.get("operation") == "divide":
+        result_df = series.reset_index(name="value")
+        engine_used = "pandas"
+
 
     # Ranking applies to the final grouped result, not the raw rows.
     if rank_direction:
@@ -294,6 +296,7 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
         "group_by": group_column,
         "rank_direction": rank_direction,
         "rank_limit": rank_limit,
+        "engine": engine_used,
         "results": records,
         "row_count_used": int(len(valid)),
         "direct_answer": calculation_text,
