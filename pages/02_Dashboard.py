@@ -292,7 +292,8 @@ st.markdown(
 
 st.info(
     "The standard dashboard sections below are automatic. Use this builder when you want to choose the graph type yourself. "
-    "It supports comparison, trend, composition, distribution, correlation and hierarchy charts."
+    "It supports comparison, trend, composition, distribution, correlation and hierarchy charts. "
+    "Each visualization keeps its own field selections so changing chart type will not reuse incompatible fields."
 )
 
 all_columns = [str(c) for c in df.columns]
@@ -346,16 +347,16 @@ with builder_top[3]:
 if custom_chart_type in {"Bar", "Line", "Area", "Funnel"}:
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("Category / X-axis", all_columns, key="dashboard_custom_x")
+        custom_x = st.selectbox("Category / X-axis", all_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_")
     with c2:
         custom_y_options = ["Row Count"] + numeric_columns
-        custom_y = st.selectbox("Metric / Y-axis", custom_y_options, key="dashboard_custom_y")
+        custom_y = st.selectbox("Metric / Y-axis", custom_y_options, key=f"dashboard_custom_y_{custom_chart_type.lower()}_")
 
 elif custom_chart_type in {"Pie", "Donut"}:
     # Pie/Donut charts represent a part-to-whole relationship.
     # Use a categorical field for the slices and a numeric field (or Row Count)
     # for the slice size. Avoid allowing the same field to be selected twice.
-    pie_category_options = categorical_columns if categorical_columns else all_columns
+    pie_category_options = categorical_columns if categorical_columns else [c for c in all_columns if c not in numeric_columns] or all_columns
     pie_value_options = ["Row Count"] + numeric_columns
 
     c1, c2 = st.columns(2)
@@ -363,14 +364,14 @@ elif custom_chart_type in {"Pie", "Donut"}:
         custom_x = st.selectbox(
             "Category",
             pie_category_options,
-            key="dashboard_custom_x",
+            key=f"dashboard_custom_x_{custom_chart_type.lower()}",
             help="Each category becomes a slice of the pie/donut.",
         )
     with c2:
         custom_y = st.selectbox(
             "Value",
             pie_value_options,
-            key="dashboard_custom_y",
+            key=f"dashboard_custom_y_{custom_chart_type.lower()}",
             help="Use Row Count for number of records, or a numeric field for Sum/Mean/etc.",
         )
     if custom_color != "None":
@@ -379,20 +380,20 @@ elif custom_chart_type in {"Pie", "Donut"}:
 elif custom_chart_type == "Scatter":
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("X-axis (numeric)", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
+        custom_x = st.selectbox("X-axis (numeric)", numeric_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_") if numeric_columns else None
     with c2:
-        custom_y = st.selectbox("Y-axis (numeric)", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
+        custom_y = st.selectbox("Y-axis (numeric)", numeric_columns, key=f"dashboard_custom_y_{custom_chart_type.lower()}_") if numeric_columns else None
 
 elif custom_chart_type == "Histogram":
-    custom_x = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
+    custom_x = st.selectbox("Numeric field", numeric_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_") if numeric_columns else None
     custom_y = None
 
 elif custom_chart_type in {"Box", "Violin", "Strip"}:
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("Category (optional)", ["None"] + categorical_columns, key="dashboard_custom_x")
+        custom_x = st.selectbox("Category (optional)", ["None"] + categorical_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_")
     with c2:
-        custom_y = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
+        custom_y = st.selectbox("Numeric field", numeric_columns, key=f"dashboard_custom_y_{custom_chart_type.lower()}_") if numeric_columns else None
 
 elif custom_chart_type == "Heatmap":
     custom_x = None
@@ -402,16 +403,18 @@ else:  # Treemap / Sunburst
     hierarchy_options = ["None"] + categorical_columns
     h1, h2, h3 = st.columns(3)
     with h1:
-        level_1 = st.selectbox("Level 1", hierarchy_options, key="dashboard_custom_level_1")
+        level_1 = st.selectbox("Level 1", hierarchy_options, key=f"dashboard_custom_level_1_{custom_chart_type.lower()}_")
     with h2:
-        level_2 = st.selectbox("Level 2", hierarchy_options, key="dashboard_custom_level_2")
+        level_2 = st.selectbox("Level 2", hierarchy_options, key=f"dashboard_custom_level_2_{custom_chart_type.lower()}_")
     with h3:
-        level_3 = st.selectbox("Level 3", hierarchy_options, key="dashboard_custom_level_3")
+        level_3 = st.selectbox("Level 3", hierarchy_options, key=f"dashboard_custom_level_3_{custom_chart_type.lower()}_")
     custom_x = level_1
     custom_y_options = ["Row Count"] + numeric_columns
-    custom_y = st.selectbox("Size / Value", custom_y_options, key="dashboard_custom_y")
+    custom_y = st.selectbox("Size / Value", custom_y_options, key=f"dashboard_custom_y_{custom_chart_type.lower()}_")
 
 if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
+    # Never leave a previous chart visible after a failed generation.
+    st.session_state["dashboard_custom_chart_figure"] = None
     try:
         fig = None
         color_arg = None if custom_color == "None" else custom_color
@@ -425,6 +428,8 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
         elif custom_chart_type == "Scatter":
             if not custom_x or not custom_y:
                 raise ValueError("Scatter requires two numeric fields.")
+            if custom_x == custom_y:
+                raise ValueError("Scatter requires two different numeric fields.")
             plot_df = df[[custom_x, custom_y] + ([custom_color] if color_arg else [])].copy()
             plot_df[custom_x] = pd.to_numeric(plot_df[custom_x], errors="coerce")
             plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
