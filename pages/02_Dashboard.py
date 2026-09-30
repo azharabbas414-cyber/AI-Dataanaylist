@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 
 from core.analytics import analyze_dataset
+from core.calculated_metrics import _metric_definition, calculate_metric_series
 
 
 # ============================================================
@@ -292,12 +293,36 @@ st.markdown(
 
 st.info(
     "The standard dashboard sections below are automatic. Use this builder when you want to choose the graph type yourself. "
-    "It supports comparison, trend, composition, distribution, correlation and hierarchy charts. "
-    "Each visualization keeps its own field selections so changing chart type will not reuse incompatible fields."
+    "It supports comparison, trend, composition, distribution, correlation and hierarchy charts."
 )
+
+if calculated_metric_options:
+    st.success(
+        "Calculated metrics available: " + ", ".join(calculated_metric_options) + ". "
+        "These use the same deterministic formulas as InsightAI AI Analyst."
+    )
 
 all_columns = [str(c) for c in df.columns]
 optional_color_columns = ["None"] + categorical_columns
+
+# Detect deterministic calculated metrics available for this dataset.
+# These metrics are calculated directly from the dataframe, so Dashboard
+# Builder uses the same calculation logic as the AI Query Engine.
+_calculated_metric_defs = {}
+for _metric_question in [
+    "total sales value",
+    "total revenue",
+    "arpu",
+]:
+    try:
+        _definition = _metric_definition(df, _metric_question)
+        if _definition:
+            _calculated_metric_defs[_definition["label"]] = _definition
+    except Exception:
+        pass
+
+calculated_metric_options = list(_calculated_metric_defs.keys())
+metric_options = ["Row Count"] + numeric_columns + calculated_metric_options
 chart_types = [
     "Bar",
     "Line",
@@ -347,31 +372,30 @@ with builder_top[3]:
 if custom_chart_type in {"Bar", "Line", "Area", "Funnel"}:
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("Category / X-axis", all_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_")
+        custom_x = st.selectbox("Category / X-axis", all_columns, key="dashboard_custom_x")
     with c2:
-        custom_y_options = ["Row Count"] + numeric_columns
-        custom_y = st.selectbox("Metric / Y-axis", custom_y_options, key=f"dashboard_custom_y_{custom_chart_type.lower()}_")
+        custom_y = st.selectbox("Metric / Y-axis", metric_options, key="dashboard_custom_y")
 
 elif custom_chart_type in {"Pie", "Donut"}:
     # Pie/Donut charts represent a part-to-whole relationship.
     # Use a categorical field for the slices and a numeric field (or Row Count)
     # for the slice size. Avoid allowing the same field to be selected twice.
-    pie_category_options = categorical_columns if categorical_columns else [c for c in all_columns if c not in numeric_columns] or all_columns
-    pie_value_options = ["Row Count"] + numeric_columns
+    pie_category_options = categorical_columns if categorical_columns else all_columns
+    pie_value_options = metric_options
 
     c1, c2 = st.columns(2)
     with c1:
         custom_x = st.selectbox(
             "Category",
             pie_category_options,
-            key=f"dashboard_custom_x_{custom_chart_type.lower()}",
+            key="dashboard_custom_x",
             help="Each category becomes a slice of the pie/donut.",
         )
     with c2:
         custom_y = st.selectbox(
             "Value",
             pie_value_options,
-            key=f"dashboard_custom_y_{custom_chart_type.lower()}",
+            key="dashboard_custom_y",
             help="Use Row Count for number of records, or a numeric field for Sum/Mean/etc.",
         )
     if custom_color != "None":
@@ -380,20 +404,20 @@ elif custom_chart_type in {"Pie", "Donut"}:
 elif custom_chart_type == "Scatter":
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("X-axis (numeric)", numeric_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_") if numeric_columns else None
+        custom_x = st.selectbox("X-axis (numeric)", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
     with c2:
-        custom_y = st.selectbox("Y-axis (numeric)", numeric_columns, key=f"dashboard_custom_y_{custom_chart_type.lower()}_") if numeric_columns else None
+        custom_y = st.selectbox("Y-axis (numeric)", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
 
 elif custom_chart_type == "Histogram":
-    custom_x = st.selectbox("Numeric field", numeric_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_") if numeric_columns else None
+    custom_x = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_x") if numeric_columns else None
     custom_y = None
 
 elif custom_chart_type in {"Box", "Violin", "Strip"}:
     c1, c2 = st.columns(2)
     with c1:
-        custom_x = st.selectbox("Category (optional)", ["None"] + categorical_columns, key=f"dashboard_custom_x_{custom_chart_type.lower()}_")
+        custom_x = st.selectbox("Category (optional)", ["None"] + categorical_columns, key="dashboard_custom_x")
     with c2:
-        custom_y = st.selectbox("Numeric field", numeric_columns, key=f"dashboard_custom_y_{custom_chart_type.lower()}_") if numeric_columns else None
+        custom_y = st.selectbox("Numeric field", numeric_columns, key="dashboard_custom_y") if numeric_columns else None
 
 elif custom_chart_type == "Heatmap":
     custom_x = None
@@ -403,18 +427,46 @@ else:  # Treemap / Sunburst
     hierarchy_options = ["None"] + categorical_columns
     h1, h2, h3 = st.columns(3)
     with h1:
-        level_1 = st.selectbox("Level 1", hierarchy_options, key=f"dashboard_custom_level_1_{custom_chart_type.lower()}_")
+        level_1 = st.selectbox("Level 1", hierarchy_options, key="dashboard_custom_level_1")
     with h2:
-        level_2 = st.selectbox("Level 2", hierarchy_options, key=f"dashboard_custom_level_2_{custom_chart_type.lower()}_")
+        level_2 = st.selectbox("Level 2", hierarchy_options, key="dashboard_custom_level_2")
     with h3:
-        level_3 = st.selectbox("Level 3", hierarchy_options, key=f"dashboard_custom_level_3_{custom_chart_type.lower()}_")
+        level_3 = st.selectbox("Level 3", hierarchy_options, key="dashboard_custom_level_3")
     custom_x = level_1
-    custom_y_options = ["Row Count"] + numeric_columns
-    custom_y = st.selectbox("Size / Value", custom_y_options, key=f"dashboard_custom_y_{custom_chart_type.lower()}_")
+    custom_y = st.selectbox("Size / Value", metric_options, key="dashboard_custom_y")
+
+def _prepare_metric_dataframe(source_df, metric_name, aggregation):
+    """Return a dataframe with a concrete numeric metric column for charting."""
+    work_df = source_df.copy()
+
+    if metric_name == "Row Count":
+        work_df["__metric_value__"] = 1.0
+        return work_df, "__metric_value__"
+
+    if metric_name in calculated_metric_options:
+        definition = _calculated_metric_defs[metric_name]
+        work_df["__metric_value__"] = calculate_metric_series(work_df, definition)
+        return work_df, "__metric_value__"
+
+    work_df["__metric_value__"] = pd.to_numeric(work_df[metric_name], errors="coerce")
+    return work_df, "__metric_value__"
+
+
+def _aggregate_metric(source_df, group_cols, metric_name, aggregation):
+    work_df, metric_col = _prepare_metric_dataframe(source_df, metric_name, aggregation)
+    work_df = work_df.dropna(subset=[metric_col])
+    if work_df.empty:
+        raise ValueError("No valid numeric values are available for the selected metric.")
+
+    agg = aggregation.lower()
+    if agg == "count":
+        grouped = work_df.groupby(group_cols, as_index=False)[metric_col].count()
+    else:
+        grouped = work_df.groupby(group_cols, as_index=False)[metric_col].agg(agg)
+    return grouped, metric_col
+
 
 if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
-    # Never leave a previous chart visible after a failed generation.
-    st.session_state["dashboard_custom_chart_figure"] = None
     try:
         fig = None
         color_arg = None if custom_color == "None" else custom_color
@@ -428,8 +480,6 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
         elif custom_chart_type == "Scatter":
             if not custom_x or not custom_y:
                 raise ValueError("Scatter requires two numeric fields.")
-            if custom_x == custom_y:
-                raise ValueError("Scatter requires two different numeric fields.")
             plot_df = df[[custom_x, custom_y] + ([custom_color] if color_arg else [])].copy()
             plot_df[custom_x] = pd.to_numeric(plot_df[custom_x], errors="coerce")
             plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
@@ -510,24 +560,8 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                 # Pie/Donut is intentionally category + one measure only.
                 if custom_y == custom_x:
                     raise ValueError("Category and Value must be different fields.")
-
-                if custom_y == "Row Count":
-                    grouped = (
-                        work.groupby(custom_x, as_index=False)
-                        .size()
-                        .rename(columns={"size": "Row Count"})
-                    )
-                    value_field = "Row Count"
-                else:
-                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                    work = work.dropna(subset=[custom_y])
-                    if work.empty:
-                        raise ValueError("No valid numeric values are available for this chart.")
-                    grouped = (
-                        work.groupby(custom_x, as_index=False)[custom_y]
-                        .agg(custom_aggregation.lower())
-                    )
-                    value_field = custom_y
+                grouped, metric_col = _aggregate_metric(work, [custom_x], custom_y, custom_aggregation)
+                value_field = metric_col
 
                 if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
                     raise ValueError("Pie and donut charts require non-negative values.")
@@ -541,22 +575,9 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                 )
 
             else:
-                if custom_y == "Row Count":
-                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
-                    grouped = (
-                        work.groupby(group_cols, as_index=False)
-                        .size()
-                        .rename(columns={"size": "Row Count"})
-                    )
-                    value_field = "Row Count"
-                else:
-                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                    work = work.dropna(subset=[custom_y])
-                    if work.empty:
-                        raise ValueError("No valid numeric values are available for this chart.")
-                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
-                    grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
-                    value_field = custom_y
+                group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
+                grouped, metric_col = _aggregate_metric(work, group_cols, custom_y, custom_aggregation)
+                value_field = metric_col
 
                 if custom_chart_type == "Bar":
                     fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
