@@ -1,8 +1,6 @@
 
-import io
-import pandas as pd
-import numpy as np
 import streamlit as st
+import pandas as pd
 
 from core.reporting import (
     build_report_data,
@@ -14,178 +12,140 @@ from core.reporting import (
 
 st.set_page_config(page_title="InsightAI | Reports", page_icon="📄", layout="wide")
 
-st.markdown("""
-<style>
-.report-header{padding:24px 28px;border-radius:16px;margin-bottom:22px;
-background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(59,130,246,.08));
-border:1px solid rgba(100,116,139,.18)}
-.report-header h1{margin:0;font-size:32px}
-.section-title{font-size:21px;font-weight:700;margin:24px 0 12px}
-.report-card{padding:16px;border:1px solid rgba(100,116,139,.18);border-radius:14px}
-</style>
-""", unsafe_allow_html=True)
-
 df = st.session_state.get("active_dataframe")
 if df is None or df.empty:
     st.warning("No active dataset found. Please select or upload a dataset first.")
     st.stop()
 
 dataset_name = st.session_state.get("active_dataset", "InsightAI Dataset")
-report_data = build_report_data(df)
 
-st.markdown(f"""
-<div class="report-header">
-<h1>📄 Management Reports</h1>
-<p>Create a management-ready summary from <b>{dataset_name}</b>.
-Choose exactly what you want management to see.</p>
-</div>
-""", unsafe_allow_html=True)
+st.title("📄 Management Intelligence Reports")
+st.caption(
+    "Build a concise management report from the actual dataset. "
+    "Select the information management needs to see."
+)
 
-st.markdown('<div class="section-title">🎛️ Report Builder</div>', unsafe_allow_html=True)
+st.subheader("🎛️ Report Content")
 
-left, right = st.columns([1, 1])
+a, b = st.columns(2)
 
-with left:
-    report_style = st.selectbox(
-        "Report emphasis",
-        ["Executive Summary", "Management + Detailed", "Full Analytical"],
-        index=0,
-    )
-
-    st.markdown("**Management Content**")
+with a:
+    st.markdown("**Executive & Business Intelligence**")
     include_summary = st.checkbox("Executive Summary", True)
     include_kpis = st.checkbox("Important KPIs / Values", True)
     include_findings = st.checkbox("Key Findings & Issues", True)
-    include_top_bottom = st.checkbox("Top / Bottom Performers", True)
-    include_trend = st.checkbox("Trend / Time Analysis", True)
+    include_actions = st.checkbox("Recommended Investigation / Management Attention", True)
+    include_top_bottom = st.checkbox("Top Contributors / Top & Bottom Performers", True)
 
-with right:
-    st.markdown("**Supporting Content**")
+with b:
+    st.markdown("**Supporting Analysis**")
+    include_trend = st.checkbox("Trend / Time Analysis", True)
     include_charts = st.checkbox("Graphs / Charts", True)
+    include_quality = st.checkbox("Data Quality", False)
     include_anomalies = st.checkbox("Anomaly Summary", False)
     include_forecast = st.checkbox("Forecast Summary", False)
-    include_quality = st.checkbox("Data Quality", False)
     include_appendix = st.checkbox("Filtered Data Appendix", False)
-
-    st.caption("Executive reports should normally focus on KPIs, findings, top/bottom performers, trends and selected charts.")
-
-# Presets
-if report_style == "Executive Summary":
-    # Keep user's choices intact; only show guidance.
-    st.info("Executive mode: keep the report concise and management-focused.")
-elif report_style == "Management + Detailed":
-    st.info("Management + Detailed mode: includes the important numbers plus supporting analysis.")
-else:
-    st.info("Full Analytical mode: suitable for analysts as well as management.")
 
 selected = {
     "summary": include_summary,
     "kpis": include_kpis,
     "findings": include_findings,
+    "actions": include_actions,
     "top_bottom": include_top_bottom,
     "trend": include_trend,
     "charts": include_charts,
+    "quality": include_quality,
     "anomalies": include_anomalies,
     "forecast": include_forecast,
-    "quality": include_quality,
     "appendix": include_appendix,
 }
 
-st.markdown('<div class="section-title">👀 Report Preview</div>', unsafe_allow_html=True)
+st.divider()
+st.subheader("👀 Management Report Preview")
 
 preview = generate_management_report(df, dataset_name, selected, preview=True)
 
-p1, p2, p3 = st.columns(3)
-if include_summary:
-    p1.success("✓ Executive Summary")
-else:
-    p1.caption("Executive Summary excluded")
-if include_kpis:
-    p2.success("✓ KPIs / Important Values")
-else:
-    p2.caption("KPIs excluded")
-if include_findings:
-    p3.success("✓ Key Findings")
-else:
-    p3.caption("Key Findings excluded")
-
-st.markdown("### 📌 Important Values")
 if include_kpis and preview["kpis"]:
-    kcols = st.columns(min(5, len(preview["kpis"])))
+    st.markdown("### 📌 Important KPIs")
+    cols = st.columns(min(5, len(preview["kpis"])))
     for i, item in enumerate(preview["kpis"][:5]):
-        with kcols[i]:
+        with cols[i]:
             st.metric(item["label"], item["value"])
-else:
-    st.caption("KPIs are not selected.")
 
 if include_summary:
     st.markdown("### 💼 Executive Summary")
-    for x in preview["summary"]:
-        st.markdown(f"• {x}")
+    for item in preview["summary"]:
+        st.markdown(f"• {item}")
 
-if include_top_bottom:
-    st.markdown("### 🏆 Top / Bottom Performers")
-    if not preview["top_bottom"].empty:
-        st.dataframe(preview["top_bottom"], use_container_width=True, hide_index=True)
-    else:
-        st.caption("No suitable categorical/metric combination was detected.")
+if include_top_bottom and not preview["top_bottom"].empty:
+    st.markdown("### 🏆 Top Contributors")
+    st.dataframe(preview["top_bottom"], use_container_width=True, hide_index=True)
 
-if include_trend:
-    st.markdown("### 📈 Trend Analysis")
-    if not preview["trend"].empty:
-        st.line_chart(preview["trend"].set_index(preview["trend"].columns[0]))
-    else:
-        st.caption("No suitable date/time + metric combination was detected.")
+if include_trend and not preview["trend"].empty:
+    st.markdown("### 📈 Trend")
+    chart_df = preview["trend"].set_index(preview["trend"].columns[0])
+    st.line_chart(chart_df)
 
 if include_findings:
     st.markdown("### 🔎 Key Findings")
-    for x in preview["findings"]:
-        st.info(x)
+    for item in preview["findings"]:
+        st.info(item)
+
+if include_actions:
+    st.markdown("### 🎯 Recommended Investigation / Management Attention")
+    for item in preview["actions"]:
+        st.warning(item)
 
 if include_quality:
-    st.markdown("### 🧹 Data Quality")
     q = preview["quality"]
-    st.write(q)
+    st.markdown("### 🧹 Data Quality")
+    q1, q2, q3 = st.columns(3)
+    q1.metric("Completeness", f"{q['completeness']:.1f}%")
+    q2.metric("Missing Cells", f"{q['missing_cells']:,}")
+    q3.metric("Duplicate Rows", f"{q['duplicate_rows']:,}")
 
-st.markdown('<div class="section-title">⬇️ Generate Selected Report</div>', unsafe_allow_html=True)
+st.divider()
+st.subheader("⬇️ Generate Report")
 
 c1, c2, c3 = st.columns(3)
 
 with c1:
     if st.button("📄 Generate PDF", type="primary", use_container_width=True):
-        with st.spinner("Building management PDF..."):
+        with st.spinner("Building management intelligence PDF..."):
             data = generate_pdf_report(df, dataset_name, selected)
-            st.download_button(
-                "⬇️ Download PDF",
-                data=data,
-                file_name="InsightAI_Management_Report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
+        st.download_button(
+            "⬇️ Download PDF",
+            data=data,
+            file_name="InsightAI_Management_Intelligence_Report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
 
 with c2:
     if st.button("📝 Generate Word", type="primary", use_container_width=True):
-        with st.spinner("Building management Word report..."):
+        with st.spinner("Building management intelligence Word report..."):
             data = generate_docx_report(df, dataset_name, selected)
-            st.download_button(
-                "⬇️ Download Word",
-                data=data,
-                file_name="InsightAI_Management_Report.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
+        st.download_button(
+            "⬇️ Download Word",
+            data=data,
+            file_name="InsightAI_Management_Intelligence_Report.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
 
 with c3:
     if st.button("📊 Generate Excel", type="primary", use_container_width=True):
-        with st.spinner("Building management Excel report..."):
+        with st.spinner("Building management intelligence Excel report..."):
             data = generate_excel_report(df, dataset_name, selected)
-            st.download_button(
-                "⬇️ Download Excel",
-                data=data,
-                file_name="InsightAI_Management_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+        st.download_button(
+            "⬇️ Download Excel",
+            data=data,
+            file_name="InsightAI_Management_Intelligence_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 
-st.divider()
-st.caption("InsightAI • Management reporting should summarize the important business story, not merely describe the raw dataset.")
+st.caption(
+    "Management Intelligence focuses on important values, contributors, changes, "
+    "findings and recommended investigation — not raw dataset statistics."
+)
