@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+
+from core.calculated_metrics import _metric_definition, calculate_metric_series
 
 from core.analytics import analyze_dataset
-from core.calculated_metrics import _metric_definition, calculate_metric_series
 
 
 # ============================================================
@@ -296,33 +298,46 @@ st.info(
     "It supports comparison, trend, composition, distribution, correlation and hierarchy charts."
 )
 
-# Detect deterministic calculated metrics available for this dataset.
-# These metrics are calculated directly from the dataframe, so Dashboard
-# Builder uses the same calculation logic as the AI Query Engine.
-_calculated_metric_defs = {}
-for _metric_question in [
-    "total sales value",
-    "total revenue",
-    "arpu",
-]:
+all_columns = [str(c) for c in df.columns]
+
+# ============================================================
+# CALCULATED METRICS
+# ============================================================
+# Keep calculated metrics deterministic and shared with the Query Engine.
+# These labels are exposed in the Dashboard Builder so the same formulas
+# used by AI Analyst can also be used directly in charts.
+
+_calculated_metric_candidates = {
+    "Sales Value": "What is the total sales value",
+    "Calculated Revenue": "What is the total calculated revenue",
+    "ARPU": "What is the ARPU",
+}
+
+calculated_metric_options = {}
+for _label, _question in _calculated_metric_candidates.items():
     try:
-        _definition = _metric_definition(df, _metric_question)
+        _definition = _metric_definition(df, _question)
         if _definition:
-            _calculated_metric_defs[_definition["label"]] = _definition
+            calculated_metric_options[_label] = _definition
     except Exception:
         pass
 
-calculated_metric_options = list(_calculated_metric_defs.keys())
+# Existing numeric fields + deterministic calculated metrics.
+metric_options = ["Row Count"] + numeric_columns + [
+    label for label in calculated_metric_options if label not in numeric_columns
+]
 
-if calculated_metric_options:
-    st.success(
-        "Calculated metrics available: " + ", ".join(calculated_metric_options) + ". "
-        "These use the same deterministic formulas as InsightAI AI Analyst."
-    )
+def _is_calculated_metric(value):
+    return value in calculated_metric_options
 
-all_columns = [str(c) for c in df.columns]
+def _metric_series(dataframe, metric):
+    if metric == "Row Count":
+        return pd.Series(1, index=dataframe.index, dtype="int64")
+    if _is_calculated_metric(metric):
+        return calculate_metric_series(dataframe, calculated_metric_options[metric])
+    return pd.to_numeric(dataframe[metric], errors="coerce")
+
 optional_color_columns = ["None"] + categorical_columns
-metric_options = ["Row Count"] + numeric_columns + calculated_metric_options
 chart_types = [
     "Bar",
     "Line",
@@ -435,37 +450,6 @@ else:  # Treemap / Sunburst
     custom_x = level_1
     custom_y = st.selectbox("Size / Value", metric_options, key="dashboard_custom_y")
 
-def _prepare_metric_dataframe(source_df, metric_name, aggregation):
-    """Return a dataframe with a concrete numeric metric column for charting."""
-    work_df = source_df.copy()
-
-    if metric_name == "Row Count":
-        work_df["__metric_value__"] = 1.0
-        return work_df, "__metric_value__"
-
-    if metric_name in calculated_metric_options:
-        definition = _calculated_metric_defs[metric_name]
-        work_df["__metric_value__"] = calculate_metric_series(work_df, definition)
-        return work_df, "__metric_value__"
-
-    work_df["__metric_value__"] = pd.to_numeric(work_df[metric_name], errors="coerce")
-    return work_df, "__metric_value__"
-
-
-def _aggregate_metric(source_df, group_cols, metric_name, aggregation):
-    work_df, metric_col = _prepare_metric_dataframe(source_df, metric_name, aggregation)
-    work_df = work_df.dropna(subset=[metric_col])
-    if work_df.empty:
-        raise ValueError("No valid numeric values are available for the selected metric.")
-
-    agg = aggregation.lower()
-    if agg == "count":
-        grouped = work_df.groupby(group_cols, as_index=False)[metric_col].count()
-    else:
-        grouped = work_df.groupby(group_cols, as_index=False)[metric_col].agg(agg)
-    return grouped, metric_col
-
-
 if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
     try:
         fig = None
@@ -522,15 +506,18 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
             levels = list(dict.fromkeys(levels))
             if not levels:
                 raise ValueError(f"{custom_chart_type} requires at least one category level.")
-            cols = levels + ([] if custom_y == "Row Count" else [custom_y])
+            cols = levels + ([] if custom_y == "Row Count" or _is_calculated_metric(custom_y) else [custom_y])
             work = df[cols].copy()
+            if _is_calculated_metric(custom_y):
+                work[custom_y] = _metric_series(df, custom_y)
             for level in levels:
                 work[level] = work[level].fillna("Missing").astype(str)
             if custom_y == "Row Count":
                 work["__value__"] = 1
                 value_field = "__value__"
             else:
-                work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                if not _is_calculated_metric(custom_y):
+                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
                 work = work.dropna(subset=[custom_y])
                 value_field = custom_y
             if work.empty:
@@ -549,19 +536,38 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
             # category and value creates duplicate DataFrame columns and can
             # make pandas return a DataFrame instead of a Series.
             cols = []
-            for col in [custom_x, custom_y if custom_y != "Row Count" else None, color_arg]:
+            for col in [custom_x, (custom_y if custom_y != "Row Count" and not _is_calculated_metric(custom_y) else None), color_arg]:
                 if col and col not in cols:
                     cols.append(col)
 
             work = df[cols].copy()
+            if _is_calculated_metric(custom_y):
+                work[custom_y] = _metric_series(df, custom_y)
             work[custom_x] = work[custom_x].fillna("Missing").astype(str)
 
             if custom_chart_type in {"Pie", "Donut"}:
                 # Pie/Donut is intentionally category + one measure only.
                 if custom_y == custom_x:
                     raise ValueError("Category and Value must be different fields.")
-                grouped, metric_col = _aggregate_metric(work, [custom_x], custom_y, custom_aggregation)
-                value_field = metric_col
+
+                if custom_y == "Row Count":
+                    grouped = (
+                        work.groupby(custom_x, as_index=False)
+                        .size()
+                        .rename(columns={"size": "Row Count"})
+                    )
+                    value_field = "Row Count"
+                else:
+                    if not _is_calculated_metric(custom_y):
+                        work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                    work = work.dropna(subset=[custom_y])
+                    if work.empty:
+                        raise ValueError("No valid numeric values are available for this chart.")
+                    grouped = (
+                        work.groupby(custom_x, as_index=False)[custom_y]
+                        .agg(custom_aggregation.lower())
+                    )
+                    value_field = custom_y
 
                 if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
                     raise ValueError("Pie and donut charts require non-negative values.")
@@ -575,9 +581,23 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                 )
 
             else:
-                group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
-                grouped, metric_col = _aggregate_metric(work, group_cols, custom_y, custom_aggregation)
-                value_field = metric_col
+                if custom_y == "Row Count":
+                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
+                    grouped = (
+                        work.groupby(group_cols, as_index=False)
+                        .size()
+                        .rename(columns={"size": "Row Count"})
+                    )
+                    value_field = "Row Count"
+                else:
+                    if not _is_calculated_metric(custom_y):
+                        work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
+                    work = work.dropna(subset=[custom_y])
+                    if work.empty:
+                        raise ValueError("No valid numeric values are available for this chart.")
+                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
+                    grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
+                    value_field = custom_y
 
                 if custom_chart_type == "Bar":
                     fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
@@ -604,6 +624,48 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
         key="dashboard_custom_chart_output",
     )
     st.caption("Custom visualization generated directly from the active dataset. Change the graph type or fields and generate again.")
+
+    if st.button("➕ Add to My Dashboard", type="secondary", use_container_width=True, key="dashboard_add_saved_chart"):
+        if "dashboard_saved_charts" not in st.session_state:
+            st.session_state["dashboard_saved_charts"] = []
+
+        saved_chart = {
+            "figure": st.session_state["dashboard_custom_chart_figure"].to_dict(),
+            "title": st.session_state.get("dashboard_custom_chart_title_value", custom_title),
+            "chart_type": custom_chart_type,
+            "x": custom_x,
+            "y": custom_y,
+            "aggregation": custom_aggregation,
+            "color": custom_color,
+        }
+        st.session_state["dashboard_saved_charts"].append(saved_chart)
+        st.success("Chart added to My Dashboard.")
+
+
+# ============================================================
+# SAVED DASHBOARD
+# ============================================================
+
+if st.session_state.get("dashboard_saved_charts"):
+    st.markdown('<div class="section-title">📌 My Dashboard</div>', unsafe_allow_html=True)
+    st.caption("Saved custom visualizations are kept for this Streamlit session.")
+
+    saved = st.session_state["dashboard_saved_charts"]
+    for _idx, _saved in enumerate(saved):
+        _left, _right = st.columns([6, 1])
+        with _left:
+            st.markdown(f"**{_saved.get('title', 'Saved Chart')}**")
+        with _right:
+            if st.button("🗑️ Remove", key=f"dashboard_remove_saved_{_idx}"):
+                st.session_state["dashboard_saved_charts"].pop(_idx)
+                st.rerun()
+
+        st.plotly_chart(
+            go.Figure(_saved["figure"]),
+            use_container_width=True,
+            key=f"dashboard_saved_chart_{_idx}",
+        )
+        st.divider()
 
 
 # ============================================================
