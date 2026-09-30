@@ -435,6 +435,31 @@ def _evaluate_models(
     return scores, best_name, candidates[best_name]
 
 
+def _forecast_reliability(observations: int, mape: float | None) -> dict[str, Any]:
+    """Return a transparent, heuristic reliability assessment.
+
+    This is deliberately labeled as a practical product heuristic, not a
+    statistical guarantee. It combines history length and chronological
+    holdout MAPE so the UI can explain when a forecast deserves more caution.
+    """
+    if observations < 12:
+        level = "Limited"
+        reason = "The historical series is short, so trend and seasonality are difficult to validate."
+    elif mape is None:
+        level = "Limited"
+        reason = "A percentage error could not be calculated reliably for the historical holdout."
+    elif mape <= 10:
+        level = "Good"
+        reason = "The selected model showed relatively low error on the chronological holdout."
+    elif mape <= 20:
+        level = "Moderate"
+        reason = "The model has useful signal, but historical forecast error is material."
+    else:
+        level = "Limited"
+        reason = "Historical holdout error is relatively high, so the future estimate should be treated cautiously."
+    return {"level": level, "reason": reason, "observations": observations, "mape": mape}
+
+
 def build_forecast(
     df: pd.DataFrame,
     date_column: str,
@@ -494,8 +519,12 @@ def build_forecast(
         residual_std = max(float(np.std(values)) * 0.05, 1e-9)
 
     horizon_scale = np.sqrt(np.arange(1, forecast_periods + 1))
-    lower = predictions - 1.96 * residual_std * horizon_scale
-    upper = predictions + 1.96 * residual_std * horizon_scale
+    # This is an RMSE/residual-based approximate uncertainty range. It is not
+    # a formal model-specific prediction interval, so the UI must not call it
+    # a guaranteed "95% prediction interval".
+    uncertainty_multiplier = 1.96
+    lower = predictions - uncertainty_multiplier * residual_std * horizon_scale
+    upper = predictions + uncertainty_multiplier * residual_std * horizon_scale
     if np.nanmin(values) >= 0:
         lower = np.maximum(lower, 0)
 
@@ -514,6 +543,11 @@ def build_forecast(
     final_change = ((predictions[-1] - values[-1]) / abs(values[-1]) * 100) if values[-1] != 0 else None
     recent_change = ((values[-1] - base) / abs(base) * 100) if len(values) > 1 and base != 0 else None
 
+    selected_mape = None
+    if selected in backtest_scores:
+        selected_mape = backtest_scores[selected].get("mape")
+    reliability = _forecast_reliability(int(len(values)), selected_mape)
+
     diagnostics = {
         "observations": int(len(values)),
         "frequency": frequency or str(step),
@@ -528,6 +562,8 @@ def build_forecast(
         "forecast_mean": float(np.mean(predictions)),
         "final_change_pct": float(final_change) if final_change is not None else None,
         "recent_change_pct": float(recent_change) if recent_change is not None else None,
+        "reliability": reliability,
+        "uncertainty_method": "Approximate RMSE/residual-based range; not a formal prediction interval.",
     }
 
     return {
@@ -542,7 +578,8 @@ def build_forecast(
         "time_grain": time_grain or "Auto",
         "aggregation": aggregation,
         "seasonal_period": season,
-        "confidence_level": 95,
+        "confidence_level": None,
+        "uncertainty_method": "Approximate RMSE/residual-based range; not a formal prediction interval.",
         "diagnostics": diagnostics,
         "model": None,
     }
