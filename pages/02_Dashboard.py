@@ -296,15 +296,6 @@ st.info(
     "It supports comparison, trend, composition, distribution, correlation and hierarchy charts."
 )
 
-if calculated_metric_options:
-    st.success(
-        "Calculated metrics available: " + ", ".join(calculated_metric_options) + ". "
-        "These use the same deterministic formulas as InsightAI AI Analyst."
-    )
-
-all_columns = [str(c) for c in df.columns]
-optional_color_columns = ["None"] + categorical_columns
-
 # Detect deterministic calculated metrics available for this dataset.
 # These metrics are calculated directly from the dataframe, so Dashboard
 # Builder uses the same calculation logic as the AI Query Engine.
@@ -322,6 +313,15 @@ for _metric_question in [
         pass
 
 calculated_metric_options = list(_calculated_metric_defs.keys())
+
+if calculated_metric_options:
+    st.success(
+        "Calculated metrics available: " + ", ".join(calculated_metric_options) + ". "
+        "These use the same deterministic formulas as InsightAI AI Analyst."
+    )
+
+all_columns = [str(c) for c in df.columns]
+optional_color_columns = ["None"] + categorical_columns
 metric_options = ["Row Count"] + numeric_columns + calculated_metric_options
 chart_types = [
     "Bar",
