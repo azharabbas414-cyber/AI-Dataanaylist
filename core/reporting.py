@@ -1,355 +1,334 @@
+
 import io
 from datetime import datetime
-import re
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
-)
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from docx import Document
-from docx.shared import Inches
-from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
+from docx.shared import Inches, Pt
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.chart import BarChart, LineChart, Reference
+
+
+def _sales_metric(df):
+    if "Quantity" in df.columns and "UnitPrice" in df.columns:
+        q = pd.to_numeric(df["Quantity"], errors="coerce")
+        p = pd.to_numeric(df["UnitPrice"], errors="coerce")
+        return q * p, "Sales Value", "Quantity × UnitPrice"
+    candidates = [c for c in df.select_dtypes(include=np.number).columns
+                  if not any(x in str(c).lower() for x in ["id", "code", "zip", "postal"])]
+    if candidates:
+        c = candidates[0]
+        return pd.to_numeric(df[c], errors="coerce"), str(c), str(c)
+    return None, None, None
 
 
 def build_report_data(df):
-    rows, columns = len(df), len(df.columns)
-    total_cells = rows * columns
-    missing_cells = int(df.isna().sum().sum())
-    duplicate_rows = int(df.duplicated().sum())
-    completeness = ((total_cells - missing_cells) / total_cells * 100) if total_cells else 100
+    rows, cols = len(df), len(df.columns)
+    cells = rows * cols
+    missing = int(df.isna().sum().sum())
     return {
-        "rows": rows, "columns": columns, "missing_cells": missing_cells,
-        "duplicate_rows": duplicate_rows, "completeness": completeness,
+        "rows": rows, "columns": cols, "missing_cells": missing,
+        "duplicate_rows": int(df.duplicated().sum()),
+        "completeness": ((cells-missing)/cells*100) if cells else 100,
         "numeric_columns": list(df.select_dtypes(include=np.number).columns),
-        "categorical_columns": list(df.select_dtypes(include=["object", "category", "bool"]).columns),
-        "datetime_columns": list(df.select_dtypes(include=["datetime", "datetimetz"]).columns),
+        "categorical_columns": list(df.select_dtypes(include=["object","category","bool"]).columns),
+        "datetime_columns": list(df.select_dtypes(include=["datetime","datetimetz"]).columns),
     }
 
 
-def detect_calculated_metrics(df):
-    out = {}
-    cols = {str(c).lower().replace(" ", "").replace("_", ""): c for c in df.columns}
-    qty = next((cols[k] for k in ["quantity", "qty", "units"] if k in cols), None)
-    price = next((cols[k] for k in ["unitprice", "price", "unitcost"] if k in cols), None)
-    if qty and price:
-        q = pd.to_numeric(df[qty], errors="coerce")
-        p = pd.to_numeric(df[price], errors="coerce")
-        out["Sales Value"] = q * p
+def _detect_date(df):
+    for c in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[c]):
+            return c
+    for c in df.columns:
+        if any(x in str(c).lower() for x in ["date","time","timestamp"]):
+            parsed = pd.to_datetime(df[c], errors="coerce")
+            if parsed.notna().mean() >= 0.6:
+                return c
+    return None
+
+
+def _kpis(df):
+    values, name, formula = _sales_metric(df)
+    out = []
+    if values is not None:
+        out.append({"label": f"Total {name}", "value": f"{values.sum():,.2f}", "raw": float(values.sum())})
+        out.append({"label": f"Average {name}", "value": f"{values.mean():,.2f}", "raw": float(values.mean())})
+        out.append({"label": f"Maximum {name}", "value": f"{values.max():,.2f}", "raw": float(values.max())})
+    if "Quantity" in df.columns:
+        q = pd.to_numeric(df["Quantity"], errors="coerce").sum()
+        out.append({"label": "Total Quantity", "value": f"{q:,.0f}", "raw": float(q)})
+    if "CustomerID" in df.columns:
+        n = df["CustomerID"].nunique(dropna=True)
+        out.append({"label": "Customers", "value": f"{n:,}", "raw": float(n)})
+    out.append({"label": "Transactions / Rows", "value": f"{len(df):,}", "raw": float(len(df))})
+    return out, name, formula
+
+
+def _top_bottom(df, n=10):
+    values, metric, formula = _sales_metric(df)
+    if values is None:
+        return pd.DataFrame()
+    candidates = [c for c in df.select_dtypes(include=["object","category"]).columns
+                  if df[c].nunique(dropna=True) <= 1000]
+    if not candidates:
+        return pd.DataFrame()
+    # Prefer business dimensions.
+    preferred = next((c for c in candidates if str(c).lower() in
+                      ["country","product","description","category","region","customer","customerid"]), candidates[0])
+    temp = pd.DataFrame({"Dimension": df[preferred].astype("string"), "Metric": values})
+    temp = temp.dropna(subset=["Dimension"]).groupby("Dimension", as_index=False)["Metric"].sum()
+    temp = temp.sort_values("Metric", ascending=False).head(n)
+    temp.insert(0, "Rank", range(1, len(temp)+1))
+    temp = temp.rename(columns={"Dimension": preferred, "Metric": metric})
+    return temp
+
+
+def _trend(df):
+    values, metric, formula = _sales_metric(df)
+    date_col = _detect_date(df)
+    if values is None or date_col is None:
+        return pd.DataFrame()
+    temp = pd.DataFrame({"Date": pd.to_datetime(df[date_col], errors="coerce"), "Value": values})
+    temp = temp.dropna(subset=["Date","Value"])
+    if temp.empty:
+        return pd.DataFrame()
+    temp["Period"] = temp["Date"].dt.to_period("M").astype(str)
+    out = temp.groupby("Period", as_index=False)["Value"].sum()
+    out = out.rename(columns={"Value": metric})
     return out
 
 
-def metric_candidates(df):
-    metrics = {}
-    for c in df.select_dtypes(include=np.number).columns:
-        metrics[str(c)] = pd.to_numeric(df[c], errors="coerce")
-    metrics.update(detect_calculated_metrics(df))
-    return metrics
+def _summary(df, data):
+    s = [f"The dataset contains {data['rows']:,} rows across {data['columns']:,} fields."]
+    kpis, metric, formula = _kpis(df)
+    if metric:
+        total = next((x["value"] for x in kpis if x["label"].startswith("Total ")), None)
+        s.append(f"Total {metric} is {total}, calculated using {formula}.")
+    if len(df):
+        if data["missing_cells"] == 0:
+            s.append("No missing cells were detected in the selected dataset.")
+        else:
+            s.append(f"{data['missing_cells']:,} missing cells should be reviewed.")
+    tb = _top_bottom(df)
+    if not tb.empty:
+        s.append(f"The leading {tb.columns[1]} is {tb.iloc[0,1]} with {tb.iloc[0,2]:,.2f} in {metric}.")
+    tr = _trend(df)
+    if len(tr) >= 2:
+        peak = tr.loc[tr.iloc[:,1].idxmax()]
+        low = tr.loc[tr.iloc[:,1].idxmin()]
+        s.append(f"The peak monthly {metric} is {peak.iloc[0]} at {peak.iloc[1]:,.2f}; the lowest is {low.iloc[0]} at {low.iloc[1]:,.2f}.")
+    return s
 
 
-def kpi_summary(df):
-    metrics = metric_candidates(df)
-    result = []
-    for name, s in metrics.items():
-        v = s.dropna()
-        if len(v):
-            result.append({
-                "Metric": name,
-                "Sum": float(v.sum()),
-                "Average": float(v.mean()),
-                "Minimum": float(v.min()),
-                "Maximum": float(v.max()),
-            })
-    return pd.DataFrame(result)
-
-
-def top_category_tables(df, limit=10):
-    result = []
-    metrics = metric_candidates(df)
-    cats = list(df.select_dtypes(include=["object", "category", "bool"]).columns)
-    for metric_name, metric in metrics.items():
-        work = pd.DataFrame({"Metric": metric, **{c: df[c] for c in cats}})
-        for c in cats[:8]:
-            temp = work.groupby(c, dropna=False)["Metric"].sum().sort_values(ascending=False).head(limit).reset_index()
-            if len(temp) > 1:
-                temp.columns = [c, metric_name]
-                result.append((f"Top {limit} {c} by {metric_name}", temp))
-    return result[:12]
-
-
-def time_series_tables(df, limit=24):
-    metrics = metric_candidates(df)
-    dates = list(df.select_dtypes(include=["datetime", "datetimetz"]).columns)
-    # Detect object columns that are parseable as dates.
-    for c in df.columns:
-        if c in dates:
-            continue
-        if df[c].dtype == object:
-            parsed = pd.to_datetime(df[c], errors="coerce")
-            if len(df) and parsed.notna().mean() >= 0.8:
-                dates.append(c)
-    result = []
-    for d in dates[:3]:
-        dt = pd.to_datetime(df[d], errors="coerce")
-        for metric_name, metric in list(metrics.items())[:5]:
-            temp = pd.DataFrame({"Date": dt, metric_name: metric}).dropna(subset=["Date"])
-            if temp.empty:
-                continue
-            temp["Period"] = temp["Date"].dt.to_period("M").astype(str)
-            agg = temp.groupby("Period")[metric_name].sum().tail(limit).reset_index()
-            if len(agg) >= 2:
-                result.append((f"Monthly {metric_name} by {d}", agg.rename(columns={"Period": "Month"})))
-    return result[:8]
-
-
-def numeric_statistics(df):
-    x = df.select_dtypes(include=np.number)
-    return x.describe().T.reset_index().rename(columns={"index": "Column"}) if not x.empty else pd.DataFrame()
-
-
-def categorical_statistics(df):
-    out = []
-    for c in df.select_dtypes(include=["object", "category", "bool"]).columns:
-        vc = df[c].value_counts(dropna=True)
-        out.append({"Column": c, "Unique Values": int(df[c].nunique(dropna=True)), "Missing": int(df[c].isna().sum()), "Top Value": vc.index[0] if not vc.empty else ""})
-    return pd.DataFrame(out)
-
-
-def correlation_summary(df):
-    x = df.select_dtypes(include=np.number)
-    if x.shape[1] < 2:
-        return pd.DataFrame()
-    c = x.corr(); rows = []; cols = list(c.columns)
-    for i in range(len(cols)):
-        for j in range(i + 1, len(cols)):
-            if pd.notna(c.iloc[i, j]):
-                rows.append({"Field 1": cols[i], "Field 2": cols[j], "Correlation": round(float(c.iloc[i, j]), 3)})
-    return pd.DataFrame(rows).assign(_abs=lambda z: z["Correlation"].abs()).sort_values("_abs", ascending=False).drop(columns="_abs") if rows else pd.DataFrame()
-
-
-def generate_executive_summary(df, report_data=None):
-    r = report_data or build_report_data(df)
-    lines = [
-        f"The report covers {r['rows']:,} records across {r['columns']:,} fields.",
-        f"Overall data completeness is {r['completeness']:.1f}%, with {r['missing_cells']:,} missing cells and {r['duplicate_rows']:,} duplicate rows.",
-    ]
-    metrics = metric_candidates(df)
-    if "Sales Value" in metrics:
-        v = metrics["Sales Value"].dropna()
-        if len(v): lines.append(f"Total sales value is {v.sum():,.2f}, with an average sales value per record of {v.mean():,.2f}.")
-    for name, s in list(metrics.items())[:3]:
-        v = s.dropna()
-        if len(v): lines.append(f"{name}: total {v.sum():,.2f}; average {v.mean():,.2f}; maximum {v.max():,.2f}.")
-    return list(dict.fromkeys(lines))
-
-
-def generate_report_findings(df):
+def _findings(df):
     findings = []
-    missing = df.isna().sum(); missing = missing[missing > 0]
-    for col, count in missing.sort_values(ascending=False).head(5).items():
-        findings.append(f"{col} contains {count:,} missing values ({count / len(df) * 100:.1f}% of rows)." if len(df) else f"{col} contains {count:,} missing values.")
-    dup = int(df.duplicated().sum())
-    if dup:
-        findings.append(f"The dataset contains {dup:,} duplicate rows.")
-    metrics = metric_candidates(df)
-    for name, s in list(metrics.items())[:8]:
-        v = s.dropna()
-        if len(v) >= 5:
-            q1, q3 = v.quantile(.25), v.quantile(.75); iqr = q3 - q1
-            if iqr:
-                n = int(((v < q1 - 1.5 * iqr) | (v > q3 + 1.5 * iqr)).sum())
-                if n:
-                    findings.append(f"{name} contains approximately {n:,} potential statistical outliers.")
-    return findings or ["No major automatic data-quality findings were identified."]
+    data = build_report_data(df)
+    if data["duplicate_rows"]:
+        findings.append(f"{data['duplicate_rows']:,} duplicate rows were identified.")
+    miss = df.isna().sum().sort_values(ascending=False)
+    for c, n in miss[miss > 0].head(3).items():
+        findings.append(f"{c} has {int(n):,} missing values ({n/len(df)*100:.1f}% of rows).")
+    tb = _top_bottom(df)
+    if not tb.empty:
+        findings.append(f"{tb.iloc[0,1]} is the largest contributor in the selected dimension.")
+    tr = _trend(df)
+    if len(tr) >= 2:
+        pct = (tr.iloc[-1,1] - tr.iloc[-2,1]) / abs(tr.iloc[-2,1]) * 100 if tr.iloc[-2,1] else 0
+        findings.append(f"The latest period changed by {pct:+.1f}% versus the previous period.")
+    return findings or ["No major automatic findings were identified from the selected dataset."]
 
 
-def _safe_sheet(name):
-    return re.sub(r"[\\/*?:\[\]]", "_", name)[:31] or "Report"
+def generate_management_report(df, dataset_name, selected, preview=False):
+    data = build_report_data(df)
+    k, metric, formula = _kpis(df)
+    result = {
+        "summary": _summary(df, data) if selected.get("summary") else [],
+        "kpis": k if selected.get("kpis") else [],
+        "findings": _findings(df) if selected.get("findings") else [],
+        "top_bottom": _top_bottom(df) if selected.get("top_bottom") else pd.DataFrame(),
+        "trend": _trend(df) if selected.get("trend") else pd.DataFrame(),
+        "quality": data if selected.get("quality") else {},
+        "metric": metric, "formula": formula, "rows": len(df),
+    }
+    return result
 
 
-def _table_pdf(data, widths=None):
+def _chart_png(df, kind):
+    if kind == "trend":
+        d = _trend(df)
+        if d.empty: return None
+        fig, ax = plt.subplots(figsize=(8, 3.6))
+        ax.plot(d.iloc[:,0], d.iloc[:,1], marker="o")
+        ax.set_title("Monthly Trend")
+        ax.set_xlabel("Period"); ax.set_ylabel(str(d.columns[1]))
+        ax.tick_params(axis="x", rotation=45)
+    else:
+        d = _top_bottom(df)
+        if d.empty: return None
+        fig, ax = plt.subplots(figsize=(8, 4.2))
+        dd = d.iloc[::-1]
+        ax.barh(dd.iloc[:,1].astype(str), dd.iloc[:,2])
+        ax.set_title(f"Top {len(d)} {d.columns[1]} by {d.columns[2]}")
+        ax.set_xlabel(str(d.columns[2]))
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _table(dataframe, widths=None):
+    data = [list(dataframe.columns)] + dataframe.astype(str).values.tolist()
     t = Table(data, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), .25, colors.grey),
-        ("FONTSIZE", (0, 0), (-1, -1), 7),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e293b")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("GRID",(0,0),(-1,-1),0.4,colors.HexColor("#cbd5e1")),
+        ("FONTSIZE",(0,0),(-1,-1),8),
+        ("VALIGN",(0,0),(-1,-1),"TOP"),
     ]))
     return t
 
 
-def _chart_png(title, frame, xcol, ycol, kind="bar"):
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(8, 4.2))
-    if kind == "line":
-        ax.plot(frame[xcol].astype(str), frame[ycol])
-    else:
-        plot_df = frame.head(15).iloc[::-1]
-        ax.barh(plot_df[xcol].astype(str), plot_df[ycol])
-    ax.set_title(title)
-    ax.grid(axis="y", alpha=.2)
-    fig.tight_layout()
-    out = io.BytesIO(); fig.savefig(out, format="png", dpi=150, bbox_inches="tight"); plt.close(fig); out.seek(0)
-    return out
+def generate_pdf_report(df, dataset_name="InsightAI Dataset", selected=None):
+    selected = selected or {k: True for k in ["summary","kpis","findings","top_bottom","trend","charts","quality","appendix","anomalies","forecast"]}
+    r = generate_management_report(df, dataset_name, selected)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=36,leftMargin=36,topMargin=36,bottomMargin=36)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("title", parent=styles["Title"], fontSize=24, alignment=TA_CENTER, spaceAfter=16)
+    h = ParagraphStyle("h", parent=styles["Heading2"], fontSize=15, spaceBefore=14, spaceAfter=8)
+    body = ParagraphStyle("body", parent=styles["BodyText"], fontSize=9.5, leading=14, spaceAfter=5)
+    story = [Paragraph("InsightAI Management Report", title),
+             Paragraph(f"<b>Dataset:</b> {dataset_name}", body),
+             Paragraph(f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}", body), Spacer(1,10)]
+    if selected.get("summary"):
+        story += [Paragraph("Executive Summary",h)] + [Paragraph("• "+x,body) for x in r["summary"]]
+    if selected.get("kpis"):
+        story.append(Paragraph("Important KPIs / Values",h))
+        kdf = pd.DataFrame([{"Metric":x["label"],"Value":x["value"]} for x in r["kpis"]])
+        story.append(_table(kdf, [3.4*inch,2.3*inch]))
+    if selected.get("top_bottom") and not r["top_bottom"].empty:
+        story += [Paragraph("Top Performers",h), _table(r["top_bottom"])]
+    if selected.get("trend") and not r["trend"].empty:
+        story += [Paragraph("Trend Analysis",h)]
+        if selected.get("charts"):
+            img = _chart_png(df,"trend")
+            if img: story.append(Image(img,width=6.7*inch,height=3.0*inch))
+        story.append(_table(r["trend"].tail(24)))
+    if selected.get("findings"):
+        story += [Paragraph("Key Findings",h)] + [Paragraph("• "+x,body) for x in r["findings"]]
+    if selected.get("charts") and not selected.get("trend"):
+        img = _chart_png(df,"top")
+        if img: story += [Paragraph("Management Chart",h), Image(img,width=6.7*inch,height=3.2*inch)]
+    if selected.get("quality"):
+        story += [Paragraph("Data Quality",h), Paragraph(f"Completeness: {r['quality']['completeness']:.1f}% | Missing cells: {r['quality']['missing_cells']:,} | Duplicates: {r['quality']['duplicate_rows']:,}",body)]
+    if selected.get("appendix"):
+        story.append(PageBreak())
+        story += [Paragraph("Filtered Data Appendix",h), _table(df.head(100))]
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
 
 
-def _selected_sections(options):
-    defaults = ["Executive Summary", "KPI Summary", "Key Findings", "Top/Bottom Analysis", "Trend Analysis", "Charts", "Data Quality"]
-    return [x for x in defaults if options.get(x, True)]
+def generate_docx_report(df, dataset_name="InsightAI Dataset", selected=None):
+    selected = selected or {k: True for k in ["summary","kpis","findings","top_bottom","trend","charts","quality","appendix","anomalies","forecast"]}
+    r = generate_management_report(df, dataset_name, selected)
+    doc = Document()
+    doc.add_heading("InsightAI Management Report", 0)
+    doc.add_paragraph(f"Dataset: {dataset_name}")
+    doc.add_paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    if selected.get("summary"):
+        doc.add_heading("Executive Summary", level=1)
+        for x in r["summary"]: doc.add_paragraph(x, style="List Bullet")
+    if selected.get("kpis"):
+        doc.add_heading("Important KPIs / Values", level=1)
+        for x in r["kpis"]: doc.add_paragraph(f"{x['label']}: {x['value']}")
+    if selected.get("top_bottom") and not r["top_bottom"].empty:
+        doc.add_heading("Top Performers", level=1)
+        t = doc.add_table(rows=1, cols=len(r["top_bottom"].columns))
+        for i,c in enumerate(r["top_bottom"].columns): t.rows[0].cells[i].text = str(c)
+        for _,row in r["top_bottom"].iterrows():
+            cells=t.add_row().cells
+            for i,v in enumerate(row): cells[i].text=str(v)
+    if selected.get("trend") and not r["trend"].empty:
+        doc.add_heading("Trend Analysis", level=1)
+        for _,row in r["trend"].tail(24).iterrows(): doc.add_paragraph(" | ".join(map(str,row.tolist())))
+    if selected.get("findings"):
+        doc.add_heading("Key Findings", level=1)
+        for x in r["findings"]: doc.add_paragraph(x, style="List Bullet")
+    if selected.get("quality"):
+        doc.add_heading("Data Quality", level=1)
+        q=r["quality"]; doc.add_paragraph(f"Completeness: {q['completeness']:.1f}% | Missing: {q['missing_cells']:,} | Duplicates: {q['duplicate_rows']:,}")
+    if selected.get("appendix"):
+        doc.add_heading("Filtered Data Appendix", level=1)
+        t=doc.add_table(rows=1, cols=len(df.columns))
+        for i,c in enumerate(df.columns): t.rows[0].cells[i].text=str(c)
+        for _,row in df.head(100).iterrows():
+            cells=t.add_row().cells
+            for i,v in enumerate(row): cells[i].text=str(v)
+    out=io.BytesIO(); doc.save(out); out.seek(0); return out.getvalue()
 
 
-def generate_excel_report(df, dataset_name="InsightAI Dataset", filters=None, options=None, saved_charts=None):
-    options = options or {}; sections = _selected_sections(options)
-    out = io.BytesIO(); wb = Workbook(); ws = wb.active; ws.title = "Executive Summary"
-    ws.append(["InsightAI Management Analytics Report"]); ws.append(["Dataset", dataset_name]); ws.append(["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")])
-    if filters:
-        ws.append([]); ws.append(["Applied Filters"])
-        for k, v in filters.items(): ws.append([k, str(v)])
-    r = build_report_data(df)
-    if "Executive Summary" in sections:
-        ws.append([]); ws.append(["Executive Summary"])
-        for line in generate_executive_summary(df, r): ws.append([line])
-    if "KPI Summary" in sections:
-        ws.append([]); ws.append(["KPI", "Value"])
-        metrics = metric_candidates(df)
-        for name, s in metrics.items():
-            v = s.dropna()
-            if len(v): ws.append([f"Total {name}", float(v.sum())])
-    if "Key Findings" in sections:
-        ws.append([]); ws.append(["Key Findings"])
-        for x in generate_report_findings(df): ws.append([x])
-    if "Top/Bottom Analysis" in sections:
-        for title, frame in top_category_tables(df):
-            sh = wb.create_sheet(_safe_sheet(title));
-            for row in dataframe_to_rows(frame, index=False, header=True): sh.append(list(row))
-    if "Trend Analysis" in sections:
-        for title, frame in time_series_tables(df):
-            sh = wb.create_sheet(_safe_sheet(title));
-            for row in dataframe_to_rows(frame, index=False, header=True): sh.append(list(row))
-    if "Data Quality" in sections:
-        for name, frame in [("Numeric Statistics", numeric_statistics(df)), ("Category Summary", categorical_statistics(df)), ("Correlations", correlation_summary(df))]:
-            sh = wb.create_sheet(name)
-            if not frame.empty:
-                for row in dataframe_to_rows(frame, index=False, header=True): sh.append(list(row))
-    if options.get("Raw Data", False):
-        sh = wb.create_sheet("Filtered Data")
-        preview = df.head(int(options.get("Raw Data Rows", 100000)))
-        for row in dataframe_to_rows(preview, index=False, header=True): sh.append(list(row))
-    if saved_charts and options.get("Chart Register", True):
-        sh = wb.create_sheet("Chart Register")
-        sh.append(["Title", "Section", "Chart Type", "Category", "Metric", "Aggregation", "Ranking"])
-        for item in saved_charts:
-            c = item.get("config", {})
-            sh.append([item.get("title", c.get("title", "Saved Chart")), item.get("section", "Other"), c.get("chart_type", c.get("type", "")), c.get("x", c.get("category", "")), c.get("y", c.get("metric", "")), c.get("aggregation", ""), c.get("ranking", "")])
-    for sh in wb.worksheets:
-        sh.freeze_panes = "A2"
-        sh.column_dimensions["A"].width = 34
-    wb.save(out); out.seek(0); return out.getvalue()
+def generate_excel_report(df, dataset_name="InsightAI Dataset", selected=None):
+    selected = selected or {k: True for k in ["summary","kpis","findings","top_bottom","trend","charts","quality","appendix","anomalies","forecast"]}
+    r = generate_management_report(df, dataset_name, selected)
+    out=io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        if selected.get("kpis"):
+            pd.DataFrame([{"Metric":x["label"],"Value":x["value"]} for x in r["kpis"]]).to_excel(writer,index=False,sheet_name="KPIs")
+        if selected.get("top_bottom") and not r["top_bottom"].empty:
+            r["top_bottom"].to_excel(writer,index=False,sheet_name="Top Performers")
+        if selected.get("trend") and not r["trend"].empty:
+            r["trend"].to_excel(writer,index=False,sheet_name="Trend")
+        if selected.get("findings"):
+            pd.DataFrame({"Finding":r["findings"]}).to_excel(writer,index=False,sheet_name="Findings")
+        if selected.get("quality"):
+            pd.DataFrame([r["quality"]]).to_excel(writer,index=False,sheet_name="Data Quality")
+        if selected.get("appendix"):
+            df.head(10000).to_excel(writer,index=False,sheet_name="Data Appendix")
+        if selected.get("summary"):
+            pd.DataFrame({"Executive Summary":r["summary"]}).to_excel(writer,index=False,sheet_name="Executive Summary")
+    out.seek(0)
+    return out.getvalue()
 
 
-def generate_pdf_report(df, dataset_name="InsightAI Dataset", filters=None, options=None, saved_charts=None):
-    options = options or {}; sections = _selected_sections(options)
-    out = io.BytesIO(); doc = SimpleDocTemplate(out, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    styles = getSampleStyleSheet(); story = [Paragraph("InsightAI Management Analytics Report", styles["Title"]), Paragraph(dataset_name, styles["Heading2"]), Paragraph(datetime.now().strftime("Generated %Y-%m-%d %H:%M"), styles["Normal"]), Spacer(1, 12)]
-    if filters:
-        story += [Paragraph("Report Scope & Filters", styles["Heading2"])]
-        for k, v in filters.items(): story.append(Paragraph(f"• {k}: {v}", styles["BodyText"]))
-    r = build_report_data(df)
-    if "Executive Summary" in sections:
-        story += [Spacer(1, 8), Paragraph("Executive Summary", styles["Heading2"])]
-        for x in generate_executive_summary(df, r): story.append(Paragraph("• " + x, styles["BodyText"]))
-    if "KPI Summary" in sections:
-        story += [Spacer(1, 8), Paragraph("Management KPI Summary", styles["Heading2"])]
-        rows = [["KPI", "Total", "Average", "Minimum", "Maximum"]]
-        for name, s in metric_candidates(df).items():
-            v = s.dropna()
-            if len(v): rows.append([name, f"{v.sum():,.2f}", f"{v.mean():,.2f}", f"{v.min():,.2f}", f"{v.max():,.2f}"])
-        story.append(_table_pdf(rows))
-    if "Key Findings" in sections:
-        story += [Spacer(1, 8), Paragraph("Key Findings", styles["Heading2"])]
-        for x in generate_report_findings(df): story.append(Paragraph("• " + x, styles["BodyText"]))
-    if "Top/Bottom Analysis" in sections:
-        story += [Spacer(1, 8), Paragraph("Top Category Analysis", styles["Heading2"])]
-        for title, frame in top_category_tables(df, limit=10)[:6]:
-            story.append(Paragraph(title, styles["Heading3"]))
-            story.append(_table_pdf([list(frame.columns)] + frame.round(2).astype(str).values.tolist()))
-            story.append(Spacer(1, 6))
-    if "Trend Analysis" in sections:
-        story += [Spacer(1, 8), Paragraph("Trend Analysis", styles["Heading2"])]
-        for title, frame in time_series_tables(df)[:4]:
-            story.append(Paragraph(title, styles["Heading3"]))
-            story.append(_table_pdf([list(frame.columns)] + frame.round(2).astype(str).values.tolist()))
-    if "Charts" in sections:
-        story += [PageBreak(), Paragraph("Management Charts", styles["Heading2"])]
-        for title, frame in top_category_tables(df, limit=10)[:3]:
-            x, y = frame.columns[:2]
-            img = _chart_png(title, frame, x, y, "bar")
-            story.append(Image(img, width=7.1 * inch, height=3.7 * inch)); story.append(Spacer(1, 8))
-    if "Data Quality" in sections:
-        story += [PageBreak(), Paragraph("Data Quality & Structure", styles["Heading2"])]
-        story.append(_table_pdf([["Measure", "Value"], ["Rows", f"{r['rows']:,}"], ["Columns", f"{r['columns']:,}"], ["Completeness", f"{r['completeness']:.1f}%"], ["Missing Cells", f"{r['missing_cells']:,}"], ["Duplicate Rows", f"{r['duplicate_rows']:,}"]]))
-        n = numeric_statistics(df)
-        if not n.empty:
-            story.append(Spacer(1, 8)); story.append(Paragraph("Numeric Statistics", styles["Heading3"]))
-            show = n.head(15); story.append(_table_pdf([list(show.columns)] + show.round(3).astype(str).values.tolist()))
-    if options.get("Raw Data", False):
-        story += [PageBreak(), Paragraph("Filtered Data Appendix", styles["Heading2"])]
-        preview = df.head(int(options.get("Raw Data Rows", 100)))
-        if not preview.empty:
-            show = preview.copy().astype(str).iloc[:, :8]
-            story.append(_table_pdf([list(show.columns)] + show.values.tolist()))
-    doc.build(story); out.seek(0); return out.getvalue()
+# Backward-compatible helpers used by older modules.
+def generate_executive_summary(df, report_data=None):
+    return _summary(df, report_data or build_report_data(df))
 
+def generate_report_findings(df):
+    return _findings(df)
 
-def generate_docx_report(df, dataset_name="InsightAI Dataset", filters=None, options=None, saved_charts=None):
-    options = options or {}; sections = _selected_sections(options)
-    out = io.BytesIO(); doc = Document(); doc.add_heading("InsightAI Management Analytics Report", 0); doc.add_paragraph(dataset_name); doc.add_paragraph(datetime.now().strftime("Generated %Y-%m-%d %H:%M")); r = build_report_data(df)
-    if filters:
-        doc.add_heading("Report Scope & Filters", 1)
-        for k, v in filters.items(): doc.add_paragraph(f"{k}: {v}")
-    if "Executive Summary" in sections:
-        doc.add_heading("Executive Summary", 1)
-        for x in generate_executive_summary(df, r): doc.add_paragraph(x, style="List Bullet")
-    if "KPI Summary" in sections:
-        doc.add_heading("Management KPI Summary", 1)
-        table = doc.add_table(rows=1, cols=5); table.style = "Table Grid"
-        for i, c in enumerate(["KPI", "Total", "Average", "Minimum", "Maximum"]): table.rows[0].cells[i].text = c
-        for name, s in metric_candidates(df).items():
-            v = s.dropna()
-            if len(v):
-                cells = table.add_row().cells
-                vals = [name, f"{v.sum():,.2f}", f"{v.mean():,.2f}", f"{v.min():,.2f}", f"{v.max():,.2f}"]
-                for i, val in enumerate(vals): cells[i].text = val
-    if "Key Findings" in sections:
-        doc.add_heading("Key Findings", 1)
-        for x in generate_report_findings(df): doc.add_paragraph(x, style="List Bullet")
-    if "Top/Bottom Analysis" in sections:
-        doc.add_heading("Top Category Analysis", 1)
-        for title, frame in top_category_tables(df)[:6]:
-            doc.add_heading(title, 2)
-            table = doc.add_table(rows=1, cols=len(frame.columns)); table.style = "Table Grid"
-            for i, c in enumerate(frame.columns): table.rows[0].cells[i].text = str(c)
-            for vals in frame.round(2).astype(str).values:
-                cells = table.add_row().cells
-                for i, v in enumerate(vals): cells[i].text = v
-    if "Trend Analysis" in sections:
-        doc.add_heading("Trend Analysis", 1)
-        for title, frame in time_series_tables(df)[:4]:
-            doc.add_heading(title, 2); doc.add_paragraph(frame.to_string(index=False))
-    if "Charts" in sections:
-        doc.add_heading("Management Charts", 1)
-        for title, frame in top_category_tables(df)[:3]:
-            img = _chart_png(title, frame, frame.columns[0], frame.columns[1], "bar")
-            doc.add_paragraph(title); doc.add_picture(img, width=Inches(6.5))
-    if "Data Quality" in sections:
-        doc.add_heading("Data Quality", 1)
-        for x in [f"Rows: {r['rows']:,}", f"Columns: {r['columns']:,}", f"Completeness: {r['completeness']:.1f}%", f"Missing Cells: {r['missing_cells']:,}", f"Duplicate Rows: {r['duplicate_rows']:,}"]: doc.add_paragraph(x)
-    if options.get("Raw Data", False):
-        doc.add_heading("Filtered Data Appendix", 1); doc.add_paragraph(df.head(int(options.get("Raw Data Rows", 100))).to_string(index=False))
-    doc.save(out); out.seek(0); return out.getvalue()
+def numeric_statistics(df):
+    return df.select_dtypes(include=np.number).describe().T.reset_index().rename(columns={"index":"Column"})
+
+def categorical_statistics(df):
+    rows=[]
+    for c in df.select_dtypes(include=["object","category","bool"]).columns:
+        vc=df[c].value_counts(dropna=True)
+        rows.append({"Column":c,"Unique Values":int(df[c].nunique(dropna=True)),
+                     "Missing":int(df[c].isna().sum()),"Top Value":str(vc.index[0]) if not vc.empty else ""})
+    return pd.DataFrame(rows)
+
+def correlation_summary(df):
+    n=df.select_dtypes(include=np.number)
+    if n.shape[1]<2:return pd.DataFrame()
+    c=n.corr(); rows=[]
+    for i,a in enumerate(c.columns):
+        for j,b in enumerate(c.columns):
+            if j>i and pd.notna(c.iloc[i,j]):
+                rows.append({"Field 1":a,"Field 2":b,"Correlation":round(float(c.iloc[i,j]),3)})
+    return pd.DataFrame(rows)
