@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import json
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
@@ -7,6 +8,7 @@ import plotly.graph_objects as go
 from core.calculated_metrics import _metric_definition, calculate_metric_series
 
 from core.analytics import analyze_dataset
+from ai.provider import get_ai_provider
 
 
 # ============================================================
@@ -652,6 +654,89 @@ def _apply_ranking(grouped, value_field, ranking, rank_n):
     return grouped
 
 
+def _build_chart_evidence(dataframe, config):
+    """Create compact, deterministic evidence for Explain This Chart."""
+    fig = _build_custom_figure(dataframe, config)
+    records = []
+    for trace in fig.data:
+        x_values = list(trace.x) if trace.x is not None else []
+        y_values = list(trace.y) if trace.y is not None else []
+        n = max(len(x_values), len(y_values))
+        for i in range(n):
+            row = {}
+            if i < len(x_values):
+                row["x"] = x_values[i]
+            if i < len(y_values):
+                row["y"] = y_values[i]
+            if getattr(trace, "name", None):
+                row["series"] = trace.name
+            records.append(row)
+    evidence = pd.DataFrame(records)
+    if not evidence.empty and "y" in evidence.columns:
+        evidence["y_numeric"] = pd.to_numeric(evidence["y"], errors="coerce")
+    return fig, evidence
+
+
+def _fallback_chart_explanation(dataframe, config, evidence):
+    """Deterministic explanation used when no AI provider is configured."""
+    title = config.get("title", "Chart")
+    lines = ["### What happened?", f"**{title}** is based on **{len(dataframe):,} filtered rows**."]
+    if evidence.empty or "y_numeric" not in evidence.columns:
+        lines.append("No numeric chart series is available for deeper ranking analysis.")
+        return "\n\n".join(lines)
+    valid = evidence.dropna(subset=["y_numeric"]).copy()
+    if valid.empty:
+        return "\n\n".join(lines + ["No valid numeric values are available in the chart evidence."])
+    max_row = valid.loc[valid["y_numeric"].idxmax()]
+    min_row = valid.loc[valid["y_numeric"].idxmin()]
+    total = valid["y_numeric"].sum()
+    lines.extend([
+        f"- Highest value: **{max_row.get('x', 'N/A')}** ({max_row['y_numeric']:,.2f})",
+        f"- Lowest value: **{min_row.get('x', 'N/A')}** ({min_row['y_numeric']:,.2f})",
+        f"- Total displayed value: **{total:,.2f}**",
+        "",
+        "### What should I investigate next?",
+        "- Examine the highest-value category or period in more detail.",
+        "- Compare the result against the active dashboard filters.",
+        "- Drill into the underlying product, customer, or time dimension if available.",
+    ])
+    return "\n".join(lines)
+
+
+def _explain_chart(dataframe, config):
+    """Explain a chart using actual chart data and current dashboard filters."""
+    _, evidence = _build_chart_evidence(dataframe, config)
+    compact = evidence.head(30).to_dict(orient="records") if not evidence.empty else []
+    prompt = f"""
+You are InsightAI explaining a dashboard chart.
+
+Chart configuration:
+{json.dumps(config, default=str, indent=2)}
+
+Current filtered dataset:
+- Rows: {len(dataframe):,}
+- Columns: {len(dataframe.columns):,}
+
+Actual chart evidence calculated from the filtered dataframe:
+{json.dumps(compact, default=str, indent=2)}
+
+Instructions:
+1. Explain only what the supplied chart evidence supports.
+2. Start with 'What happened?' and identify the most important pattern.
+3. Add 'What stands out?' with concrete values where useful.
+4. Add 'What should I investigate next?' with 2-4 actionable follow-ups.
+5. Do not invent causes. If a cause is not proven, describe it as something to investigate.
+6. Keep it concise and professional.
+""".strip()
+    try:
+        provider = get_ai_provider()
+        if provider.is_available():
+            return provider.analyze(prompt)
+    except Exception:
+        pass
+    return _fallback_chart_explanation(dataframe, config, evidence)
+
+
 def _build_custom_figure(dataframe, config):
     """Build a custom Plotly figure from a chart specification and dataframe."""
     chart_type = config["chart_type"]
@@ -868,6 +953,19 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
         st.session_state["dashboard_saved_charts"].append({"config": config.copy()})
         st.success("Chart added to My Dashboard.")
 
+    if st.button("🤖 Explain This Chart", type="secondary", use_container_width=True, key="dashboard_explain_custom_chart"):
+        with st.spinner("Analyzing chart evidence..."):
+            try:
+                st.session_state["dashboard_custom_chart_explanation"] = _explain_chart(
+                    df, st.session_state.get("dashboard_custom_chart_config", _current_config)
+                )
+            except Exception as exc:
+                st.session_state["dashboard_custom_chart_explanation"] = f"Unable to explain this chart: {exc}"
+
+    if st.session_state.get("dashboard_custom_chart_explanation"):
+        with st.expander("🤖 Explain This Chart", expanded=True):
+            st.markdown(st.session_state["dashboard_custom_chart_explanation"])
+
 
 # ============================================================
 # SAVED DASHBOARD
@@ -900,6 +998,15 @@ if st.session_state.get("dashboard_saved_charts"):
                 st.info("This saved chart has no reusable configuration. Remove it and save it again.")
         except Exception as _exc:
             st.warning(f"Saved chart could not be recalculated with the current filters: {_exc}")
+        if st.button("🤖 Explain This Chart", key=f"dashboard_explain_saved_{_idx}"):
+            with st.spinner("Analyzing chart evidence..."):
+                try:
+                    st.session_state[f"dashboard_saved_explanation_{_idx}"] = _explain_chart(df, _config)
+                except Exception as _exc:
+                    st.session_state[f"dashboard_saved_explanation_{_idx}"] = f"Unable to explain this chart: {_exc}"
+        if st.session_state.get(f"dashboard_saved_explanation_{_idx}"):
+            with st.expander("🤖 AI Explanation", expanded=True):
+                st.markdown(st.session_state[f"dashboard_saved_explanation_{_idx}"])
         st.divider()
 
 
