@@ -302,6 +302,195 @@ st.markdown(
 
 
 # ============================================================
+# EXECUTIVE KPI CARDS + AUTOMATIC DATA STORY
+# ============================================================
+
+st.markdown('<div class="section-title">📈 Executive Overview</div>', unsafe_allow_html=True)
+
+
+def _safe_numeric_series(frame, column):
+    if column not in frame.columns:
+        return pd.Series(dtype="float64")
+    return pd.to_numeric(frame[column], errors="coerce")
+
+
+def _first_matching_column(columns, keywords):
+    lowered = {str(c).lower(): c for c in columns}
+    for key in keywords:
+        for low, original in lowered.items():
+            if key in low:
+                return original
+    return None
+
+
+def _executive_metrics(frame):
+    """Derive a small set of useful, dataset-aware executive KPIs."""
+    metrics = []
+
+    # Prefer deterministic calculated Sales Value when the dataset supports it.
+    sales_value = None
+    try:
+        definition = _metric_definition(frame, "What is the total sales value")
+        if definition:
+            values = pd.to_numeric(calculate_metric_series(frame, definition), errors="coerce")
+            sales_value = float(values.sum())
+    except Exception:
+        sales_value = None
+
+    if sales_value is not None and np.isfinite(sales_value):
+        metrics.append(("Total Sales Value", f"{sales_value:,.2f}", "Calculated: Quantity × UnitPrice"))
+    else:
+        revenue_col = _first_matching_column(frame.columns, ["revenue", "sales", "amount", "turnover", "totalprice"])
+        if revenue_col:
+            values = _safe_numeric_series(frame, revenue_col).dropna()
+            if not values.empty:
+                metrics.append((f"Total {revenue_col}", f"{values.sum():,.2f}", f"SUM({revenue_col})"))
+
+    # Transaction / row count is always available.
+    metrics.append(("Transactions / Rows", f"{len(frame):,}", "Current filtered dataset"))
+
+    customer_col = _first_matching_column(frame.columns, ["customerid", "customer_id", "customer", "subscriber", "account"])
+    if customer_col:
+        customers = frame[customer_col].dropna().nunique()
+        metrics.append(("Unique Customers", f"{customers:,}", customer_col))
+
+    quantity_col = _first_matching_column(frame.columns, ["quantity", "units", "volume"])
+    if quantity_col:
+        quantity = _safe_numeric_series(frame, quantity_col).dropna()
+        if not quantity.empty:
+            metrics.append(("Units / Quantity", f"{quantity.sum():,.0f}", quantity_col))
+
+    # Average order / transaction value when a revenue-like metric exists.
+    if sales_value is not None and len(frame) > 0:
+        metrics.append(("Avg Sales / Row", f"{sales_value / len(frame):,.2f}", "Total Sales Value ÷ Rows"))
+    elif len(metrics) < 5:
+        numeric_candidates = [c for c in numeric_columns if c in frame.columns]
+        if numeric_candidates:
+            c = numeric_candidates[0]
+            vals = _safe_numeric_series(frame, c).dropna()
+            if not vals.empty:
+                metrics.append((f"Avg {c}", f"{vals.mean():,.2f}", c))
+
+    # Keep the executive strip compact and predictable.
+    return metrics[:6]
+
+
+executive_metrics = _executive_metrics(df)
+_exec_cols = st.columns(min(6, max(1, len(executive_metrics))))
+for _i, (_label, _value, _detail) in enumerate(executive_metrics):
+    with _exec_cols[_i % len(_exec_cols)]:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">{_label}</div>
+                <div class="kpi-value">{_value}</div>
+                <div class="small-muted">{_detail}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# Automatic, evidence-based data story. The AI is given deterministic facts
+# first; if an AI provider is unavailable, a useful local story is produced.
+def _build_executive_story(frame):
+    facts = []
+    facts.append(f"Rows in current filtered dataset: {len(frame):,}")
+
+    # Sales value and strongest country/category when available.
+    try:
+        definition = _metric_definition(frame, "What is the total sales value")
+    except Exception:
+        definition = None
+
+    if definition:
+        values = pd.to_numeric(calculate_metric_series(frame, definition), errors="coerce")
+        total = float(values.sum())
+        facts.append(f"Total sales value (Quantity × UnitPrice): {total:,.2f}")
+        if categorical_columns:
+            # Prefer country, then category/product-like dimensions.
+            group_col = _first_matching_column(frame.columns, ["country", "category", "product", "region"])
+            if group_col:
+                temp = pd.DataFrame({group_col: frame[group_col].fillna("Missing").astype(str), "__sales": values})
+                grouped = temp.groupby(group_col, as_index=False)["__sales"].sum().sort_values("__sales", ascending=False)
+                if not grouped.empty:
+                    top = grouped.iloc[0]
+                    share = (float(top["__sales"]) / total * 100) if total else 0
+                    facts.append(f"Top {group_col}: {top[group_col]} with {float(top['__sales']):,.2f} ({share:.1f}% of total)")
+
+    # Missingness / duplicate facts.
+    missing = int(frame.isna().sum().sum())
+    facts.append(f"Missing cells: {missing:,}")
+    facts.append(f"Duplicate rows: {int(frame.duplicated().sum()):,}")
+
+    # Strongest numeric field by mean/dispersion for a generic dataset.
+    if numeric_columns:
+        candidates = []
+        for col in numeric_columns:
+            vals = _safe_numeric_series(frame, col).dropna()
+            if len(vals) >= 2:
+                candidates.append((col, float(vals.std()), float(vals.mean())))
+        if candidates:
+            col, std, mean = max(candidates, key=lambda x: x[1] if np.isfinite(x[1]) else -1)
+            facts.append(f"Highest numeric dispersion by standard deviation: {col} (mean {mean:,.2f}, std {std:,.2f})")
+
+    prompt = f"""
+You are the InsightAI executive data-story engine.
+Create a concise executive summary from ONLY these deterministic facts.
+
+{chr(10).join('- ' + x for x in facts)}
+
+Use exactly these sections:
+### What happened?
+### What stands out?
+### What should I investigate next?
+
+Rules:
+- Do not invent causes or unsupported facts.
+- Distinguish observed patterns from hypotheses.
+- Mention current filters when relevant.
+- Give 2-4 concrete next investigations.
+- Keep the answer concise and business-friendly.
+""".strip()
+
+    try:
+        provider = get_ai_provider()
+        if provider.is_available():
+            return provider.analyze(prompt)
+    except Exception:
+        pass
+
+    # Deterministic fallback.
+    lines = ["### What happened?", f"The current dashboard view contains **{len(frame):,} rows** after applying the active filters."]
+    if definition:
+        lines.append(f"Total sales value is **{total:,.2f}** based on Quantity × UnitPrice.")
+    lines += [
+        "",
+        "### What stands out?",
+        f"The dashboard currently contains **{missing:,} missing cells** and **{int(frame.duplicated().sum()):,} duplicate rows**.",
+        "",
+        "### What should I investigate next?",
+        "- Drill into the highest-value country, product, or category.",
+        "- Examine the time trend to identify peaks and declines.",
+        "- Review anomalies and customer-level concentration where those fields exist.",
+    ]
+    return "\n".join(lines)
+
+
+with st.expander("📖 Automatic Data Story", expanded=True):
+    st.caption("Evidence is calculated from the current filtered dataset. AI adds narrative only after the deterministic facts are prepared.")
+    if st.button("✨ Generate / Refresh Data Story", type="secondary", key="dashboard_generate_data_story"):
+        with st.spinner("Building the executive data story..."):
+            st.session_state["dashboard_executive_story"] = _build_executive_story(df)
+
+    if st.session_state.get("dashboard_executive_story"):
+        st.markdown(st.session_state["dashboard_executive_story"])
+    else:
+        # Show a useful deterministic story immediately, without requiring an AI key.
+        st.markdown(_build_executive_story(df))
+
+
+# ============================================================
 # KPI SECTION
 # ============================================================
 
@@ -950,7 +1139,7 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
         if "dashboard_saved_charts" not in st.session_state:
             st.session_state["dashboard_saved_charts"] = []
         config = st.session_state.get("dashboard_custom_chart_config", _current_config.copy())
-        st.session_state["dashboard_saved_charts"].append({"config": config.copy()})
+        st.session_state["dashboard_saved_charts"].append({"config": config.copy(), "title": config.get("title", "Saved Chart"), "section": "Other"})
         st.success("Chart added to My Dashboard.")
 
     if st.button("🤖 Explain This Chart", type="secondary", use_container_width=True, key="dashboard_explain_custom_chart"):
@@ -968,47 +1157,160 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
 
 
 # ============================================================
-# SAVED DASHBOARD
+# SAVED DASHBOARD / PROFESSIONAL LAYOUT
 # ============================================================
 
-if st.session_state.get("dashboard_saved_charts"):
-    st.markdown('<div class="section-title">📌 My Dashboard</div>', unsafe_allow_html=True)
-    st.caption("Saved charts automatically recalculate when Global Filters / Slicers change.")
+if "dashboard_saved_charts" not in st.session_state:
+    st.session_state.dashboard_saved_charts = []
 
-    saved = st.session_state["dashboard_saved_charts"]
-    for _idx, _saved in enumerate(saved):
-        _config = _saved.get("config", {})
-        _left, _right = st.columns([6, 1])
-        with _left:
-            st.markdown(f"**{_config.get('title', 'Saved Chart')}**")
-        with _right:
-            if st.button("🗑️ Remove", key=f"dashboard_remove_saved_{_idx}"):
-                st.session_state["dashboard_saved_charts"].pop(_idx)
-                st.rerun()
-        try:
-            if _config:
-                _saved_fig = _build_custom_figure(df, _config)
-                _saved_fig.update_layout(height=460, margin=dict(l=20, r=20, t=70, b=20))
-                st.plotly_chart(_saved_fig, use_container_width=True, key=f"dashboard_saved_chart_{_idx}")
-            elif _saved.get("figure"):
-                # Backward compatibility for charts saved by the previous
-                # session-state format. They remain viewable until removed.
-                st.plotly_chart(go.Figure(_saved["figure"]), use_container_width=True, key=f"dashboard_saved_chart_{_idx}")
-            else:
-                st.info("This saved chart has no reusable configuration. Remove it and save it again.")
-        except Exception as _exc:
-            st.warning(f"Saved chart could not be recalculated with the current filters: {_exc}")
-        if st.button("🤖 Explain This Chart", key=f"dashboard_explain_saved_{_idx}"):
-            with st.spinner("Analyzing chart evidence..."):
+_DASHBOARD_SECTIONS = [
+    "Executive Overview",
+    "Trends",
+    "Categories / Geography",
+    "Detailed Analysis",
+    "Other",
+]
+
+if "dashboard_view_mode" not in st.session_state:
+    st.session_state.dashboard_view_mode = "Executive View"
+
+st.markdown('<div class="section-title">📌 My Dashboard</div>', unsafe_allow_html=True)
+
+_view_col, _reset_col = st.columns([5, 1])
+with _view_col:
+    st.session_state.dashboard_view_mode = st.selectbox(
+        "Dashboard View",
+        ["Executive View", "Analyst View", "Detailed View"],
+        index=["Executive View", "Analyst View", "Detailed View"].index(
+            st.session_state.dashboard_view_mode
+        ),
+        key="dashboard_view_mode_select",
+        label_visibility="collapsed",
+    )
+with _reset_col:
+    if st.button("↻ Reset Dashboard", use_container_width=True, key="dashboard_reset_saved"):
+        st.session_state.dashboard_saved_charts = []
+        for _k in list(st.session_state.keys()):
+            if _k.startswith("dashboard_chart_"):
+                del st.session_state[_k]
+        st.rerun()
+
+if not st.session_state.get("dashboard_saved_charts"):
+    st.info("No saved charts yet. Build a custom visualization and click ➕ Add to My Dashboard.")
+else:
+    st.caption("Saved charts recalculate from the current filtered dataset. Use Manage to rename, organize, duplicate, reorder, or remove charts.")
+
+    # Backfill metadata for charts created by older versions.
+    for _saved in st.session_state["dashboard_saved_charts"]:
+        _saved.setdefault("section", "Other")
+        _saved.setdefault("title", _saved.get("config", {}).get("title", "Saved Chart"))
+
+    _visible_sections = _DASHBOARD_SECTIONS
+    if st.session_state.dashboard_view_mode == "Executive View":
+        _visible_sections = ["Executive Overview", "Trends", "Categories / Geography"]
+    elif st.session_state.dashboard_view_mode == "Analyst View":
+        _visible_sections = ["Executive Overview", "Trends", "Categories / Geography", "Detailed Analysis"]
+
+    for _section in _visible_sections:
+        _section_items = [
+            (_idx, _saved)
+            for _idx, _saved in enumerate(st.session_state["dashboard_saved_charts"])
+            if _saved.get("section", "Other") == _section
+        ]
+        if not _section_items:
+            continue
+
+        st.markdown(f"### {_section}")
+
+        # Two-column BI-style layout. Detailed View uses the full width for
+        # easier inspection of dense charts.
+        _grid_cols = 1 if st.session_state.dashboard_view_mode == "Detailed View" else 2
+        _columns = st.columns(_grid_cols)
+
+        for _pos, (_idx, _saved) in enumerate(_section_items):
+            _config = _saved.get("config", {})
+            _title = _saved.get("title") or _config.get("title", "Saved Chart")
+            _target_col = _columns[_pos % _grid_cols]
+
+            with _target_col:
+                st.markdown(f"**{_title}**")
                 try:
-                    st.session_state[f"dashboard_saved_explanation_{_idx}"] = _explain_chart(df, _config)
+                    if _config:
+                        _saved_fig = _build_custom_figure(df, _config)
+                        _saved_fig.update_layout(
+                            height=430,
+                            margin=dict(l=20, r=20, t=60, b=20),
+                        )
+                        st.plotly_chart(
+                            _saved_fig,
+                            use_container_width=True,
+                            key=f"dashboard_saved_chart_{_idx}",
+                        )
+                    elif _saved.get("figure"):
+                        st.plotly_chart(
+                            go.Figure(_saved["figure"]),
+                            use_container_width=True,
+                            key=f"dashboard_saved_chart_{_idx}",
+                        )
+                    else:
+                        st.info("This saved chart has no reusable configuration. Remove it and save it again.")
                 except Exception as _exc:
-                    st.session_state[f"dashboard_saved_explanation_{_idx}"] = f"Unable to explain this chart: {_exc}"
-        if st.session_state.get(f"dashboard_saved_explanation_{_idx}"):
-            with st.expander("🤖 AI Explanation", expanded=True):
-                st.markdown(st.session_state[f"dashboard_saved_explanation_{_idx}"])
-        st.divider()
+                    st.warning(f"Saved chart could not be recalculated with the current filters: {_exc}")
 
+                _manage_key = f"dashboard_manage_{_idx}"
+                with st.expander("⚙️ Manage", expanded=False):
+                    _new_title = st.text_input(
+                        "Chart title",
+                        value=_title,
+                        key=f"dashboard_title_{_idx}",
+                    )
+                    _new_section = st.selectbox(
+                        "Section",
+                        _DASHBOARD_SECTIONS,
+                        index=_DASHBOARD_SECTIONS.index(_saved.get("section", "Other"))
+                        if _saved.get("section", "Other") in _DASHBOARD_SECTIONS else len(_DASHBOARD_SECTIONS)-1,
+                        key=f"dashboard_section_{_idx}",
+                    )
+                    _save_meta, _duplicate, _up, _down, _remove = st.columns(5)
+                    with _save_meta:
+                        if st.button("💾 Save", key=f"dashboard_save_meta_{_idx}", use_container_width=True):
+                            _saved["title"] = _new_title.strip() or "Saved Chart"
+                            _saved["section"] = _new_section
+                            if _saved.get("config"):
+                                _saved["config"]["title"] = _saved["title"]
+                            st.rerun()
+                    with _duplicate:
+                        if st.button("📋 Copy", key=f"dashboard_duplicate_{_idx}", use_container_width=True):
+                            _copy = json.loads(json.dumps(_saved, default=str))
+                            _copy["title"] = f"{_title} (Copy)"
+                            if _copy.get("config"):
+                                _copy["config"]["title"] = _copy["title"]
+                            st.session_state["dashboard_saved_charts"].insert(_idx + 1, _copy)
+                            st.rerun()
+                    with _up:
+                        if st.button("↑", key=f"dashboard_up_{_idx}", use_container_width=True) and _idx > 0:
+                            _items = st.session_state["dashboard_saved_charts"]
+                            _items[_idx - 1], _items[_idx] = _items[_idx], _items[_idx - 1]
+                            st.rerun()
+                    with _down:
+                        if st.button("↓", key=f"dashboard_down_{_idx}", use_container_width=True) and _idx < len(st.session_state["dashboard_saved_charts"]) - 1:
+                            _items = st.session_state["dashboard_saved_charts"]
+                            _items[_idx + 1], _items[_idx] = _items[_idx], _items[_idx + 1]
+                            st.rerun()
+                    with _remove:
+                        if st.button("🗑️", key=f"dashboard_remove_saved_{_idx}", use_container_width=True):
+                            st.session_state["dashboard_saved_charts"].pop(_idx)
+                            st.rerun()
+
+                if st.button("🤖 Explain This Chart", key=f"dashboard_explain_saved_{_idx}", use_container_width=True):
+                    with st.spinner("Analyzing chart evidence..."):
+                        try:
+                            st.session_state[f"dashboard_saved_explanation_{_idx}"] = _explain_chart(df, _config)
+                        except Exception as _exc:
+                            st.session_state[f"dashboard_saved_explanation_{_idx}"] = f"Unable to explain this chart: {_exc}"
+                if st.session_state.get(f"dashboard_saved_explanation_{_idx}"):
+                    with st.expander("🤖 AI Explanation", expanded=True):
+                        st.markdown(st.session_state[f"dashboard_saved_explanation_{_idx}"])
 
 # ============================================================
 # PIE CHARTS
