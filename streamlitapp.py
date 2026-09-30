@@ -896,6 +896,7 @@ def _unlocked_steps():
     unlocked["anomaly"] = state["ai"]
     unlocked["forecasting"] = state["anomaly"]
     unlocked["network"] = state["forecasting"] and _dataset_is_network()
+    unlocked["modeling"] = has_data
     unlocked["reports"] = state["forecasting"] and (state["network"] if _dataset_is_network() else True)
     return unlocked
 
@@ -922,6 +923,7 @@ def _render_workflow_sidebar():
             ("anomaly", "🚨", "Anomaly Detection"),
             ("forecasting", "🔮", "Forecasting"),
             ("network", "🌐", "Network Intelligence"),
+            ("modeling", "🔗", "Data Modeling"),
             ("reports", "📄", "Reports"),
         ]
         for key, icon, label in labels:
@@ -956,6 +958,7 @@ pages = {
         st.Page("pages/04_Anomaly_Detection.py", title="Anomaly Detection", icon="🚨", url_path="anomaly"),
         st.Page("pages/05_Forecasting.py", title="Forecasting", icon="🔮", url_path="forecasting"),
         st.Page("pages/07_Network_Intelligence.py", title="Network Intelligence", icon="🌐", url_path="network"),
+        st.Page("pages/08_Data_Modeling.py", title="Data Modeling", icon="🔗", url_path="data-modeling"),
         st.Page("pages/06_Reports.py", title="Reports", icon="📄", url_path="reports"),
     ],
 }
@@ -975,7 +978,8 @@ PAGE_OBJECTS = {
     "anomaly": pages["Workflow"][4],
     "forecasting": pages["Workflow"][5],
     "network": pages["Workflow"][6],
-    "reports": pages["Workflow"][7],
+    "modeling": pages["Workflow"][7],
+    "reports": pages["Workflow"][8],
 }
 
 # Render our custom workflow sidebar after the router is registered.
@@ -992,6 +996,7 @@ path_to_key = {
     "anomaly": "anomaly",
     "forecasting": "forecasting",
     "network": "network",
+    "data-modeling": "modeling",
     "reports": "reports",
 }
 key = path_to_key.get(current_path)
