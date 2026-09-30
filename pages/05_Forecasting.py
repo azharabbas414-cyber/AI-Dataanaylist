@@ -357,6 +357,10 @@ diagnostics = result["diagnostics"]
 
 st.markdown('<div class="section-title">🧠 Forecast Intelligence</div>', unsafe_allow_html=True)
 
+reliability = diagnostics.get("reliability", {}) or {}
+reliability_level = reliability.get("level", "Limited")
+reliability_reason = reliability.get("reason", "Review the historical series and backtest results before relying on the forecast.")
+
 s1, s2, s3, s4, s5 = st.columns(5)
 s1.metric("Selected Model", model_name)
 s2.metric("Time Grain", time_grain_label)
@@ -366,12 +370,19 @@ s4.metric("Seasonal Pattern", f"{result.get('seasonal_period', 1)} periods")
 final_change = diagnostics.get("final_change_pct")
 s5.metric("End vs Latest", f"{final_change:+.2f}%" if final_change is not None else "N/A")
 
+reliability_icon = "🟢" if reliability_level == "Good" else "🟠" if reliability_level == "Moderate" else "🔴"
+st.markdown(
+    f'<div class="insight-box"><b>{reliability_icon} Forecast reliability: {reliability_level}</b><br>{reliability_reason}<br><small>This is a practical product heuristic based on history length and chronological holdout error; it is not a statistical guarantee.</small></div>',
+    unsafe_allow_html=True,
+)
+
 
 # ------------------------------------------------------------------
 # Main forecast chart
 # ------------------------------------------------------------------
 
-st.markdown('<div class="section-title">📈 Historical + Forecast + 95% Range</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📈 Historical + Forecast + Estimated Uncertainty</div>', unsafe_allow_html=True)
+st.caption("The shaded range is an approximate RMSE/residual-based uncertainty estimate. It is not a formal 95% prediction interval.")
 
 fig = go.Figure()
 
@@ -392,7 +403,7 @@ fig.add_trace(
         y=forecast["upper_bound"],
         mode="lines",
         line=dict(width=0),
-        name="Upper 95%",
+        name="Upper estimate",
         showlegend=False,
         hoverinfo="skip",
     )
@@ -405,7 +416,7 @@ fig.add_trace(
         mode="lines",
         line=dict(width=0),
         fill="tonexty",
-        name="95% prediction range",
+        name="Estimated uncertainty",
         hoverinfo="skip",
     )
 )
@@ -458,7 +469,7 @@ message = (
     f"The projected average is approximately **{forecast_mean:,.2f}**."
 )
 if auto_best:
-    message += f" Historical holdout testing identified **{auto_best}** as the strongest available automatic model."
+    message += f" Historical holdout testing identified **{auto_best}** as the strongest available automatic model among the models that could be evaluated."
 if recent_change is not None:
     message += f" The recent historical movement was approximately **{recent_change:+.2f}%** across the latest comparison window."
 
@@ -563,6 +574,6 @@ st.download_button(
 )
 
 st.caption(
-    "Prediction ranges are model-based uncertainty estimates, not guarantees. "
-    "For business use, compare the backtest accuracy with the cost of being wrong and review the historical series before acting on the forecast."
+    "The uncertainty range is an approximate model-based estimate, not a formal prediction interval or guarantee. "
+    "For business use, review the historical series, holdout accuracy and forecast reliability before acting on the result."
 )
