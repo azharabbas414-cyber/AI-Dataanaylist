@@ -1,9 +1,4 @@
-"""Deterministic calculated-metric engine for InsightAI.
-
-This module turns common business-language metrics into explicit formulas over
-an active dataframe. Calculations remain deterministic and auditable; an LLM
-may explain the result later but never performs the arithmetic itself.
-"""
+"""Deterministic calculated-metric engine for InsightAI."""
 from __future__ import annotations
 
 import re
@@ -20,13 +15,10 @@ def _find_exact_or_alias(df: pd.DataFrame, aliases: list[str], numeric_only: boo
     columns = list(df.columns)
     if numeric_only:
         columns = list(df.select_dtypes(include="number").columns)
-
     normalized = {_norm(c): c for c in columns}
     for alias in aliases:
         if _norm(alias) in normalized:
             return normalized[_norm(alias)]
-
-    # Prefer a column containing the full alias, then the shortest match.
     candidates: list[tuple[int, str]] = []
     for column in columns:
         nc = _norm(column)
@@ -43,26 +35,19 @@ def _find_exact_or_alias(df: pd.DataFrame, aliases: list[str], numeric_only: boo
 
 def _find_datetime_column(df: pd.DataFrame, question: str) -> str | None:
     datetime_columns = list(df.select_dtypes(include=["datetime", "datetimetz"]).columns)
-    aliases = [
-        "invoice date", "transaction date", "order date", "billing date",
-        "joining date", "date", "timestamp", "datetime", "time", "month",
-    ]
+    aliases = ["invoice date", "transaction date", "order date", "billing date", "date", "timestamp", "datetime", "time"]
     found = _find_exact_or_alias(df, aliases)
     if found in datetime_columns:
         return found
-
-    # Object columns that can be parsed as dates are considered only when the
-    # question explicitly asks for a time grouping.
     q = _norm(question)
-    if not any(token in q for token in ("month", "monthly", "year", "yearly", "date", "trend", "quarter", "week", "daily")):
+    if not any(t in q for t in ("month", "monthly", "year", "yearly", "date", "trend", "quarter", "week", "daily")):
         return None
-
     for column in df.columns:
         if column in datetime_columns:
             return column
-        if not (df[column].dtype == "object" or pd.api.types.is_string_dtype(df[column])):
+        if not pd.api.types.is_string_dtype(df[column]) and df[column].dtype != "object":
             continue
-        sample = df[column].dropna().head(200)
+        sample = df[column].dropna().head(300)
         if sample.empty:
             continue
         parsed = pd.to_datetime(sample, errors="coerce")
@@ -90,13 +75,12 @@ def _find_group_column(df: pd.DataFrame, question: str, exclude: set[str] | None
     exclude = exclude or set()
     q = _norm(question)
     categorical = [c for c in df.select_dtypes(include=["object", "category", "bool"]).columns if c not in exclude]
-
     aliases = {
-        "country": ["country"],
+        "country": ["country", "countries"],
         "region": ["region", "area", "territory", "market", "zone"],
-        "product": ["product", "item", "sku", "product name"],
-        "category": ["category", "segment", "type", "product category"],
-        "customer": ["customer", "customer id", "client"],
+        "product": ["product", "products", "item", "items", "sku", "product name", "description"],
+        "category": ["category", "categories", "segment", "segments", "type", "product category"],
+        "customer": ["customer", "customers", "customer id", "client", "clients"],
         "plan": ["plan", "package", "tariff"],
         "service": ["service", "service type"],
     }
@@ -105,90 +89,71 @@ def _find_group_column(df: pd.DataFrame, question: str, exclude: set[str] | None
             found = _find_exact_or_alias(df, terms)
             if found in categorical and found not in exclude:
                 return found
-
     for column in categorical:
         if _norm(column) in q:
             return column
     return None
 
 
-def _metric_definition(df: pd.DataFrame, question: str) -> dict[str, Any] | None:
-    """Infer a deterministic derived metric from the question."""
+def _ranking_request(question: str) -> tuple[str | None, int | None]:
     q = _norm(question)
+    patterns = [
+        ("top", r"\btop\s+(\d+)\b"),
+        ("top", r"\bhighest\s+(?:top\s+)?(\d+)\b"),
+        ("top", r"\b(?:best|largest)\s+(\d+)\b"),
+        ("bottom", r"\bbottom\s+(\d+)\b"),
+        ("bottom", r"\blowest\s+(?:bottom\s+)?(\d+)\b"),
+        ("bottom", r"\b(?:worst|smallest)\s+(\d+)\b"),
+    ]
+    for direction, pattern in patterns:
+        m = re.search(pattern, q)
+        if m:
+            return direction, max(1, min(int(m.group(1)), 100))
+    return None, None
 
+
+def _metric_definition(df: pd.DataFrame, question: str) -> dict[str, Any] | None:
+    q = _norm(question)
     numeric = set(df.select_dtypes(include="number").columns)
     if not numeric:
         return None
 
-    # Existing explicit metric columns always take precedence over a derived
-    # formula. This avoids redefining a dataset's own Revenue/Sale Price field.
-    explicit_aliases = {
-        "revenue": ["revenue", "total revenue", "sales revenue"],
-        "sales_value": ["sales value", "sale value", "sales amount", "transaction value", "line total"],
-        "profit": ["profit", "net profit", "gross profit", "earnings"],
-        "margin": ["margin", "margin percent", "profit margin"],
-    }
-
-    if any(_norm(alias) in q for alias in explicit_aliases["revenue"]):
-        existing = _find_exact_or_alias(df, explicit_aliases["revenue"], numeric_only=True)
-        if existing:
-            return {"name": existing, "label": existing, "formula": f"{existing}", "columns": [existing], "kind": "existing"}
-
-    if any(_norm(alias) in q for alias in explicit_aliases["sales_value"]):
-        existing = _find_exact_or_alias(df, explicit_aliases["sales_value"], numeric_only=True)
-        if existing:
-            return {"name": existing, "label": existing, "formula": f"{existing}", "columns": [existing], "kind": "existing"}
+    sales_terms = ("sales value", "sale value", "sales amount", "transaction value", "line total", "total sales")
+    existing_sales = _find_exact_or_alias(df, list(sales_terms), numeric_only=True)
+    if any(_norm(alias) in q for alias in sales_terms) and existing_sales:
+        return {"name": existing_sales, "label": existing_sales, "formula": existing_sales,
+                "columns": [existing_sales], "kind": "existing"}
 
     # Quantity × UnitPrice is the standard transaction sales-value formula.
-    if any(token in q for token in ("sales value", "sale value", "sales amount", "transaction value", "line total", "total sales")):
+    if any(token in q for token in sales_terms):
         quantity = _find_exact_or_alias(df, ["quantity", "qty", "order quantity", "units"], numeric_only=True)
         unit_price = _find_exact_or_alias(df, ["unitprice", "unit price", "price", "selling price"], numeric_only=True)
         if quantity and unit_price and quantity != unit_price:
-            return {
-                "name": "SalesValue",
-                "label": "Sales Value",
-                "formula": f"{quantity} × {unit_price}",
-                "columns": [quantity, unit_price],
-                "kind": "formula",
-                "operation": "multiply",
-            }
+            return {"name": "SalesValue", "label": "Sales Value", "formula": f"{quantity} × {unit_price}",
+                    "columns": [quantity, unit_price], "kind": "formula", "operation": "multiply"}
 
-    # Revenue from usage × rate is useful for telecom datasets.
-    if any(token in q for token in ("revenue", "billing", "bill value", "charge", "sales")):
+    if any(token in q for token in ("revenue", "billing", "bill value")):
         usage = _find_exact_or_alias(df, ["usage", "usage units", "data usage", "data gb", "minutes", "call minutes"], numeric_only=True)
         rate = _find_exact_or_alias(df, ["rate", "price per unit", "unit rate", "tariff"], numeric_only=True)
-        if usage and rate and usage != rate and any(token in q for token in ("revenue", "billing", "bill value")):
-            return {
-                "name": "CalculatedRevenue",
-                "label": "Calculated Revenue",
-                "formula": f"{usage} × {rate}",
-                "columns": [usage, rate],
-                "kind": "formula",
-                "operation": "multiply",
-            }
+        existing = _find_exact_or_alias(df, ["revenue", "total revenue", "sales", "total bill"], numeric_only=True)
+        if existing:
+            return {"name": existing, "label": existing, "formula": existing, "columns": [existing], "kind": "existing"}
+        if usage and rate and usage != rate:
+            return {"name": "CalculatedRevenue", "label": "Calculated Revenue", "formula": f"{usage} × {rate}",
+                    "columns": [usage, rate], "kind": "formula", "operation": "multiply"}
 
-    # Telecom ARPU / average revenue per user.
     if "arpu" in q or "average revenue per user" in q:
         revenue = _find_exact_or_alias(df, ["revenue", "total revenue", "sales", "billing", "total bill"], numeric_only=True)
         subscribers = _find_exact_or_alias(df, ["active subscribers", "subscribers", "subscriber count", "customers", "customer count"], numeric_only=True)
         if revenue and subscribers and revenue != subscribers:
-            return {
-                "name": "ARPU",
-                "label": "ARPU",
-                "formula": f"{revenue} ÷ {subscribers}",
-                "columns": [revenue, subscribers],
-                "kind": "formula",
-                "operation": "divide",
-            }
-
+            return {"name": "ARPU", "label": "ARPU", "formula": f"{revenue} ÷ {subscribers}",
+                    "columns": [revenue, subscribers], "kind": "formula", "operation": "divide"}
     return None
 
 
 def calculate_metric_series(df: pd.DataFrame, definition: dict[str, Any]) -> pd.Series:
-    """Create the metric series deterministically."""
     if definition.get("kind") == "existing":
         return pd.to_numeric(df[definition["columns"][0]], errors="coerce")
-
     a, b = definition["columns"]
     left = pd.to_numeric(df[a], errors="coerce")
     right = pd.to_numeric(df[b], errors="coerce")
@@ -200,14 +165,13 @@ def calculate_metric_series(df: pd.DataFrame, definition: dict[str, Any]) -> pd.
 
 
 def build_calculated_query(df: pd.DataFrame, question: str) -> dict[str, Any] | None:
-    """Return an executable calculated-metric query description, if recognized."""
     definition = _metric_definition(df, question)
     if not definition:
         return None
-
     grain = _find_time_grain(question)
     date_column = _find_datetime_column(df, question) if grain else None
     group_column = _find_group_column(df, question, exclude={date_column} if date_column else set())
+    direction, limit = _ranking_request(question)
 
     q = _norm(question)
     aggregation = "sum"
@@ -218,23 +182,20 @@ def build_calculated_query(df: pd.DataFrame, question: str) -> dict[str, Any] | 
     elif re.search(r"\bcount\b", q):
         aggregation = "count"
 
-    # Derived metric queries are only handled when the question actually asks
-    # for a grouped/aggregated result. Scalar calculated metrics can be added
-    # later without changing this interface.
     if not grain and not group_column:
         return None
-
     return {
         "definition": definition,
         "time_column": date_column,
         "time_grain": grain,
         "group_column": group_column,
         "aggregation": aggregation,
+        "rank_direction": direction,
+        "rank_limit": limit,
     }
 
 
 def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[str, Any]:
-    """Execute a calculated metric query and return auditable evidence."""
     definition = query["definition"]
     values = calculate_metric_series(df, definition)
     work = df.copy()
@@ -244,6 +205,8 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
     grain = query.get("time_grain")
     group_column = query.get("group_column")
     aggregation = query.get("aggregation", "sum")
+    rank_direction = query.get("rank_direction")
+    rank_limit = query.get("rank_limit")
 
     if time_column and grain:
         dates = pd.to_datetime(work[time_column], errors="coerce")
@@ -257,83 +220,71 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
             work["__time_group__"] = dates.dt.to_period("W").dt.to_timestamp("W")
         else:
             work["__time_group__"] = dates.dt.floor("D")
-        keys = ["__time_group__"]
-        if group_column:
-            keys.append(group_column)
+        keys = ["__time_group__"] + ([group_column] if group_column else [])
     else:
         keys = [group_column] if group_column else []
 
     valid = work.dropna(subset=[definition["name"]])
-    if keys:
-        grouped = valid.groupby(keys, dropna=False)
+    if not keys:
+        return {"handled": False, "intent": "calculated_metric", "reason": "No grouping dimension was detected."}
 
-        # Ratios such as ARPU should be calculated from aggregated numerator
-        # and denominator, not by summing row-level ratios.
-        if definition.get("operation") == "divide":
-            numerator, denominator = definition["columns"]
-            numerator_values = pd.to_numeric(work[numerator], errors="coerce")
-            denominator_values = pd.to_numeric(work[denominator], errors="coerce")
-            ratio_frame = work.copy()
-            ratio_frame["__numerator__"] = numerator_values
-            ratio_frame["__denominator__"] = denominator_values
-            ratio_frame = ratio_frame.dropna(subset=["__numerator__", "__denominator__"])
-            ratio_grouped = ratio_frame.groupby(keys, dropna=False)
-            numerator_sum = ratio_grouped["__numerator__"].sum()
-            denominator_sum = ratio_grouped["__denominator__"].sum()
-            series = numerator_sum.div(denominator_sum.replace(0, pd.NA))
-        else:
-            grouped_metric = grouped[definition["name"]]
-            if aggregation == "mean":
-                series = grouped_metric.mean()
-            elif aggregation == "median":
-                series = grouped_metric.median()
-            elif aggregation == "count":
-                series = grouped_metric.count()
-            else:
-                series = grouped_metric.sum()
-
-        result_df = series.reset_index(name="value")
-        result_df = result_df.sort_values(keys).reset_index(drop=True)
-
-        records: list[dict[str, Any]] = []
-        for row in result_df.to_dict(orient="records"):
-            cleaned = {}
-            for key, value in row.items():
-                if pd.isna(value):
-                    cleaned[key if key != "__time_group__" else "period"] = None
-                elif key == "__time_group__":
-                    cleaned["period"] = pd.Timestamp(value).strftime("%Y-%m")
-                elif isinstance(value, (pd.Timestamp,)):
-                    cleaned[key] = value.isoformat()
-                else:
-                    cleaned[key] = value.item() if hasattr(value, "item") else value
-            records.append(cleaned)
+    grouped = valid.groupby(keys, dropna=False)
+    if definition.get("operation") == "divide":
+        numerator, denominator = definition["columns"]
+        ratio_frame = work.copy()
+        ratio_frame["__numerator__"] = pd.to_numeric(ratio_frame[numerator], errors="coerce")
+        ratio_frame["__denominator__"] = pd.to_numeric(ratio_frame[denominator], errors="coerce")
+        ratio_frame = ratio_frame.dropna(subset=["__numerator__", "__denominator__"])
+        ratio_grouped = ratio_frame.groupby(keys, dropna=False)
+        series = ratio_grouped["__numerator__"].sum().div(ratio_grouped["__denominator__"].sum().replace(0, pd.NA))
     else:
+        grouped_metric = grouped[definition["name"]]
         if aggregation == "mean":
-            value = valid[definition["name"]].mean()
+            series = grouped_metric.mean()
         elif aggregation == "median":
-            value = valid[definition["name"]].median()
+            series = grouped_metric.median()
         elif aggregation == "count":
-            value = valid[definition["name"]].count()
+            series = grouped_metric.count()
         else:
-            value = valid[definition["name"]].sum()
-        records = [{"value": value.item() if hasattr(value, "item") else value}]
+            series = grouped_metric.sum()
+
+    result_df = series.reset_index(name="value")
+
+    # Ranking applies to the final grouped result, not the raw rows.
+    if rank_direction:
+        result_df = result_df.sort_values("value", ascending=(rank_direction == "bottom"), kind="stable")
+        result_df = result_df.head(rank_limit or 10)
+    else:
+        result_df = result_df.sort_values(keys, kind="stable").reset_index(drop=True)
+
+    records: list[dict[str, Any]] = []
+    for row in result_df.to_dict(orient="records"):
+        cleaned = {}
+        for key, value in row.items():
+            if pd.isna(value):
+                cleaned["period" if key == "__time_group__" else key] = None
+            elif key == "__time_group__":
+                cleaned["period"] = pd.Timestamp(value).strftime("%Y-%m")
+            elif hasattr(value, "item"):
+                cleaned[key] = value.item()
+            else:
+                cleaned[key] = value
+        records.append(cleaned)
 
     label = definition["label"]
-    grouping_text = ""
-    if time_column and grain:
-        grouping_text = f" by {grain} using {time_column}"
-    if group_column:
-        grouping_text += f" and {group_column}"
-
     if definition.get("operation") == "divide":
         calculation_text = f"{label} calculated as {definition['formula']} using aggregated numerator and denominator."
     else:
-        calculation_text = f"{aggregation.title()} of {label} calculated{grouping_text} using {definition['formula']}."
+        calculation_text = f"{aggregation.title()} of {label} calculated using {definition['formula']}."
+
+    if rank_direction:
+        direction_text = "top" if rank_direction == "top" else "bottom"
+        group_text = group_column or "time period"
+        calculation_text += f" Ranked {direction_text} {rank_limit} by {group_text}."
 
     return {
         "handled": True,
-        "intent": "calculated_metric",
+        "intent": "calculated_metric_ranking" if rank_direction else "calculated_metric",
         "metric": label,
         "formula": definition["formula"],
         "source_columns": definition["columns"],
@@ -341,6 +292,8 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
         "time_column": time_column,
         "time_grain": grain,
         "group_by": group_column,
+        "rank_direction": rank_direction,
+        "rank_limit": rank_limit,
         "results": records,
         "row_count_used": int(len(valid)),
         "direct_answer": calculation_text,
@@ -348,16 +301,10 @@ def execute_calculated_query(df: pd.DataFrame, query: dict[str, Any]) -> dict[st
 
 
 def run_calculated_metric_query(df: pd.DataFrame, question: str) -> dict[str, Any]:
-    """Public helper used by the query engine."""
     query = build_calculated_query(df, question)
     if not query:
         return {"handled": False, "intent": "calculated_metric", "reason": "No supported calculated metric was detected."}
     try:
         return execute_calculated_query(df, query)
     except Exception as exc:
-        return {
-            "handled": False,
-            "intent": "calculated_metric",
-            "reason": f"Calculated metric could not be executed: {exc}",
-        }
-
+        return {"handled": False, "intent": "calculated_metric", "reason": f"Calculated metric could not be executed: {exc}"}
