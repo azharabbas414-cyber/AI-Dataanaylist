@@ -114,24 +114,170 @@ if st.session_state.active_dataframe is None:
     st.stop()
 
 
-df = st.session_state.active_dataframe.copy()
+raw_df = st.session_state.active_dataframe.copy()
 
-if df.empty:
+if raw_df.empty:
     st.warning("The active dataset is empty.")
     st.stop()
 
 
 # ============================================================
-# ANALYSIS
+# GLOBAL FILTERS / SLICERS
 # ============================================================
 
+# Classification is based on the complete dataset so filter controls remain
+# stable even when a filter reduces the visible rows to a small subset.
+raw_analysis = analyze_dataset(raw_df)
+raw_classification = raw_analysis.get("classification", {})
+numeric_columns = raw_classification.get("numeric", [])
+categorical_columns = raw_classification.get("categorical", [])
+datetime_columns = raw_classification.get("datetime", [])
+
+if "dashboard_filter_cat_fields" not in st.session_state:
+    st.session_state.dashboard_filter_cat_fields = []
+if "dashboard_filter_num_fields" not in st.session_state:
+    st.session_state.dashboard_filter_num_fields = []
+
+# Clear All removes the filter widgets themselves, returning the dashboard to
+# the full dataset on the next rerun.
+_clear_filters = st.button("🧹 Clear All Filters", key="dashboard_clear_all_filters")
+if _clear_filters:
+    for _key in list(st.session_state.keys()):
+        if _key.startswith("dashboard_filter_value_") or _key.startswith("dashboard_filter_date_"):
+            del st.session_state[_key]
+    st.session_state.dashboard_filter_cat_fields = []
+    st.session_state.dashboard_filter_num_fields = []
+    st.rerun()
+
+with st.expander("🔎 Global Filters / Slicers", expanded=True):
+    st.caption("Filters below apply to KPIs, automatic charts, custom charts, and saved dashboard charts.")
+
+    filter_cat_fields = st.multiselect(
+        "Categorical filters",
+        categorical_columns,
+        default=[c for c in st.session_state.dashboard_filter_cat_fields if c in categorical_columns],
+        key="dashboard_filter_cat_fields",
+        help="Select one or more category fields to filter across the dashboard.",
+    )
+
+    filter_num_fields = st.multiselect(
+        "Numeric filters",
+        numeric_columns,
+        default=[c for c in st.session_state.dashboard_filter_num_fields if c in numeric_columns],
+        key="dashboard_filter_num_fields",
+        help="Select numeric fields when you need a range filter.",
+    )
+
+    # Date range filters are available for every detected date/time column.
+    date_filter_values = {}
+    if datetime_columns:
+        st.markdown("**Date / Time filters**")
+        date_cols = st.columns(min(3, len(datetime_columns)))
+        for _i, _date_col in enumerate(datetime_columns):
+            _parsed = pd.to_datetime(raw_df[_date_col], errors="coerce").dropna()
+            if _parsed.empty:
+                continue
+            _min_date = _parsed.min().date()
+            _max_date = _parsed.max().date()
+            _date_key = f"dashboard_filter_date_{_date_col}"
+            _default_range = st.session_state.get(_date_key, (_min_date, _max_date))
+            if not isinstance(_default_range, (tuple, list)) or len(_default_range) != 2:
+                _default_range = (_min_date, _max_date)
+            _default_range = (
+                max(_min_date, _default_range[0]),
+                min(_max_date, _default_range[1]),
+            )
+            with date_cols[_i % len(date_cols)]:
+                _selected_range = st.date_input(
+                    _date_col,
+                    value=_default_range,
+                    min_value=_min_date,
+                    max_value=_max_date,
+                    key=_date_key,
+                )
+            if isinstance(_selected_range, (tuple, list)) and len(_selected_range) == 2:
+                date_filter_values[_date_col] = _selected_range
+
+    # Categorical filters.
+    cat_filter_values = {}
+    if filter_cat_fields:
+        st.markdown("**Category filters**")
+        _cat_cols = st.columns(min(3, len(filter_cat_fields)))
+        for _i, _col in enumerate(filter_cat_fields):
+            _options = raw_df[_col].fillna("Missing").astype(str).drop_duplicates().sort_values().tolist()
+            _key = f"dashboard_filter_value_{_col}"
+            with _cat_cols[_i % len(_cat_cols)]:
+                _selected = st.multiselect(
+                    _col,
+                    _options,
+                    default=st.session_state.get(_key, []),
+                    key=_key,
+                )
+            cat_filter_values[_col] = _selected
+
+    # Numeric range filters.
+    num_filter_values = {}
+    if filter_num_fields:
+        st.markdown("**Numeric range filters**")
+        _num_cols = st.columns(min(2, len(filter_num_fields)))
+        for _i, _col in enumerate(filter_num_fields):
+            _values = pd.to_numeric(raw_df[_col], errors="coerce").dropna()
+            if _values.empty:
+                continue
+            _min_val = float(_values.min())
+            _max_val = float(_values.max())
+            _key = f"dashboard_filter_value_{_col}"
+            _previous = st.session_state.get(_key, (_min_val, _max_val))
+            if not isinstance(_previous, (tuple, list)) or len(_previous) != 2:
+                _previous = (_min_val, _max_val)
+            _previous = (max(_min_val, float(_previous[0])), min(_max_val, float(_previous[1])))
+            if _min_val == _max_val:
+                _selected_range = _previous
+                with _num_cols[_i % len(_num_cols)]:
+                    st.number_input(_col, value=_min_val, disabled=True, key=_key + "_display")
+            else:
+                with _num_cols[_i % len(_num_cols)]:
+                    _selected_range = st.slider(
+                        _col,
+                        min_value=_min_val,
+                        max_value=_max_val,
+                        value=_previous,
+                        key=_key,
+                    )
+            num_filter_values[_col] = _selected_range
+
+# Apply every selected filter to a dashboard-local dataframe. The original
+# active dataset is never mutated.
+df = raw_df.copy()
+
+for _col, _selected in cat_filter_values.items():
+    if _selected:
+        df = df[df[_col].fillna("Missing").astype(str).isin(_selected)]
+
+for _col, _selected_range in date_filter_values.items():
+    if _col in df.columns and _selected_range:
+        _parsed = pd.to_datetime(df[_col], errors="coerce")
+        _start = pd.Timestamp(_selected_range[0])
+        _end = pd.Timestamp(_selected_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+        df = df[_parsed.between(_start, _end, inclusive="both")]
+
+for _col, _selected_range in num_filter_values.items():
+    if _col in df.columns and _selected_range:
+        _values = pd.to_numeric(df[_col], errors="coerce")
+        df = df[_values.between(float(_selected_range[0]), float(_selected_range[1]), inclusive="both")]
+
+# Keep the active dashboard classification based on the filtered data for
+# fields that disappear after filtering, while preserving the original field
+# lists for filter controls.
 analysis = analyze_dataset(df)
-
 classification = analysis.get("classification", {})
-
 numeric_columns = classification.get("numeric", [])
 categorical_columns = classification.get("categorical", [])
 datetime_columns = classification.get("datetime", [])
+
+if df.empty:
+    st.warning("The current filters return no rows. Use Clear All Filters or broaden your selections.")
+    st.stop()
 
 
 # ============================================================
@@ -490,177 +636,222 @@ def _apply_ranking(grouped, value_field):
     )
     return grouped
 
+def _apply_ranking(grouped, value_field, ranking, rank_n):
+    """Apply Top/Bottom N after deterministic aggregation."""
+    if ranking == "None" or grouped is None or grouped.empty:
+        return grouped
+    values = pd.to_numeric(grouped[value_field], errors="coerce")
+    grouped = grouped.assign(__ranking_value__=values)
+    ascending = ranking == "Bottom N"
+    grouped = (
+        grouped.sort_values("__ranking_value__", ascending=ascending, kind="stable")
+        .head(int(rank_n))
+        .drop(columns=["__ranking_value__"])
+        .reset_index(drop=True)
+    )
+    return grouped
+
+
+def _build_custom_figure(dataframe, config):
+    """Build a custom Plotly figure from a chart specification and dataframe."""
+    chart_type = config["chart_type"]
+    title = config["title"]
+    color = config.get("color", "None")
+    aggregation = config.get("aggregation", "Sum")
+    x = config.get("x")
+    y = config.get("y")
+    ranking = config.get("ranking", "None")
+    rank_n = int(config.get("rank_n", 10))
+
+    color_arg = None if color == "None" else color
+
+    # Re-detect calculated metrics against the current filtered dataframe so
+    # saved charts always use the same deterministic formulas on filtered data.
+    local_metric_options = {}
+    for label, question in _calculated_metric_candidates.items():
+        try:
+            definition = _metric_definition(dataframe, question)
+            if definition:
+                local_metric_options[label] = definition
+        except Exception:
+            pass
+
+    def is_calc(metric):
+        return metric in local_metric_options
+
+    def metric_series(metric):
+        if metric == "Row Count":
+            return pd.Series(1, index=dataframe.index, dtype="int64")
+        if is_calc(metric):
+            return calculate_metric_series(dataframe, local_metric_options[metric])
+        return pd.to_numeric(dataframe[metric], errors="coerce")
+
+    if chart_type == "Heatmap":
+        local_numeric = dataframe.select_dtypes(include=np.number).columns.tolist()
+        if len(local_numeric) < 2:
+            raise ValueError("Heatmap requires at least two numeric columns.")
+        matrix = dataframe[local_numeric].apply(pd.to_numeric, errors="coerce").corr()
+        return px.imshow(matrix, text_auto=".2f", aspect="auto", title=title)
+
+    if chart_type == "Scatter":
+        if not x or not y:
+            raise ValueError("Scatter requires two numeric fields.")
+        cols = [x, y] + ([color] if color_arg and color not in [x, y] else [])
+        plot_df = dataframe[cols].copy()
+        plot_df[x] = pd.to_numeric(plot_df[x], errors="coerce")
+        plot_df[y] = pd.to_numeric(plot_df[y], errors="coerce")
+        plot_df = plot_df.dropna(subset=[x, y])
+        if plot_df.empty:
+            raise ValueError("No valid numeric rows are available for the selected scatter plot.")
+        return px.scatter(plot_df, x=x, y=y, color=color_arg, title=title,
+                          trendline="ols" if len(plot_df) >= 3 else None)
+
+    if chart_type == "Histogram":
+        if not x:
+            raise ValueError("Histogram requires a numeric field.")
+        values = pd.to_numeric(dataframe[x], errors="coerce")
+        plot_df = pd.DataFrame({x: values}).dropna()
+        if plot_df.empty:
+            raise ValueError("No valid numeric values are available for the histogram.")
+        return px.histogram(plot_df, x=x, nbins=30, marginal="box", title=title)
+
+    if chart_type in {"Box", "Violin", "Strip"}:
+        if not y:
+            raise ValueError(f"{chart_type} requires a numeric field.")
+        cols = [y]
+        if x and x != "None":
+            cols.insert(0, x)
+        if color_arg and color_arg not in cols:
+            cols.append(color_arg)
+        plot_df = dataframe[cols].copy()
+        plot_df[y] = pd.to_numeric(plot_df[y], errors="coerce")
+        plot_df = plot_df.dropna(subset=[y])
+        if plot_df.empty:
+            raise ValueError("No valid values are available for this distribution chart.")
+        x_arg = None if x == "None" else x
+        if chart_type == "Box":
+            return px.box(plot_df, x=x_arg, y=y, color=color_arg, title=title, points="outliers")
+        if chart_type == "Violin":
+            return px.violin(plot_df, x=x_arg, y=y, color=color_arg, box=True, points=False, title=title)
+        return px.strip(plot_df, x=x_arg, y=y, color=color_arg, title=title)
+
+    if chart_type in {"Treemap", "Sunburst"}:
+        levels = [level for level in config.get("levels", []) if level and level != "None"]
+        levels = list(dict.fromkeys(levels))
+        if not levels:
+            raise ValueError(f"{chart_type} requires at least one category level.")
+        cols = levels + ([] if y == "Row Count" or is_calc(y) else [y])
+        work = dataframe[cols].copy()
+        if is_calc(y):
+            work[y] = metric_series(y)
+        for level in levels:
+            work[level] = work[level].fillna("Missing").astype(str)
+        if y == "Row Count":
+            work["__value__"] = 1
+            value_field = "__value__"
+        else:
+            if not is_calc(y):
+                work[y] = pd.to_numeric(work[y], errors="coerce")
+            work = work.dropna(subset=[y])
+            value_field = y
+        if work.empty:
+            raise ValueError("No valid rows are available for this hierarchy chart.")
+        grouped = work.groupby(levels, as_index=False)[value_field].agg(aggregation.lower())
+        grouped = _apply_ranking(grouped, value_field, ranking, rank_n)
+        if chart_type == "Treemap":
+            return px.treemap(grouped, path=levels, values=value_field, color=value_field, title=title)
+        return px.sunburst(grouped, path=levels, values=value_field, color=value_field, title=title)
+
+    if not x:
+        raise ValueError("A category / X-axis field is required.")
+
+    cols = []
+    for col in [x, (y if y != "Row Count" and not is_calc(y) else None), color_arg]:
+        if col and col not in cols:
+            cols.append(col)
+    work = dataframe[cols].copy()
+    if is_calc(y):
+        work[y] = metric_series(y)
+    work[x] = work[x].fillna("Missing").astype(str)
+
+    if chart_type in {"Pie", "Donut"}:
+        if y == x:
+            raise ValueError("Category and Value must be different fields.")
+        if y == "Row Count":
+            grouped = work.groupby(x, as_index=False).size().rename(columns={"size": "Row Count"})
+            value_field = "Row Count"
+        else:
+            if not is_calc(y):
+                work[y] = pd.to_numeric(work[y], errors="coerce")
+            work = work.dropna(subset=[y])
+            if work.empty:
+                raise ValueError("No valid numeric values are available for this chart.")
+            grouped = work.groupby(x, as_index=False)[y].agg(aggregation.lower())
+            value_field = y
+        grouped = _apply_ranking(grouped, value_field, ranking, rank_n)
+        if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
+            raise ValueError("Pie and donut charts require non-negative values.")
+        return px.pie(grouped, names=x, values=value_field, title=title,
+                      hole=0.45 if chart_type == "Donut" else 0)
+
+    group_cols = [x] + ([color_arg] if color_arg and color_arg != x else [])
+    if y == "Row Count":
+        grouped = work.groupby(group_cols, as_index=False).size().rename(columns={"size": "Row Count"})
+        value_field = "Row Count"
+    else:
+        if not is_calc(y):
+            work[y] = pd.to_numeric(work[y], errors="coerce")
+        work = work.dropna(subset=[y])
+        if work.empty:
+            raise ValueError("No valid numeric values are available for this chart.")
+        grouped = work.groupby(group_cols, as_index=False)[y].agg(aggregation.lower())
+        value_field = y
+    grouped = _apply_ranking(grouped, value_field, ranking, rank_n)
+
+    if chart_type == "Bar":
+        return px.bar(grouped, x=x, y=value_field, color=color_arg, title=title)
+    if chart_type == "Line":
+        return px.line(grouped, x=x, y=value_field, color=color_arg, markers=True, title=title)
+    if chart_type == "Area":
+        return px.area(grouped, x=x, y=value_field, color=color_arg, title=title)
+    if chart_type == "Funnel":
+        return px.funnel(grouped, x=value_field, y=x, color=color_arg, title=title)
+    raise ValueError("Unsupported chart type.")
+
+
+_current_config = {
+    "chart_type": custom_chart_type,
+    "title": custom_title,
+    "color": custom_color,
+    "aggregation": custom_aggregation,
+    "x": custom_x,
+    "y": custom_y,
+    "ranking": custom_ranking,
+    "rank_n": int(custom_rank_n),
+}
+if custom_chart_type in {"Treemap", "Sunburst"}:
+    _current_config["levels"] = [level_1, level_2, level_3]
+
 if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
     try:
-        fig = None
-        color_arg = None if custom_color == "None" else custom_color
-
-        if custom_chart_type == "Heatmap":
-            if len(numeric_columns) < 2:
-                raise ValueError("Heatmap requires at least two numeric columns.")
-            matrix = df[numeric_columns].apply(pd.to_numeric, errors="coerce").corr()
-            fig = px.imshow(matrix, text_auto=".2f", aspect="auto", title=custom_title)
-
-        elif custom_chart_type == "Scatter":
-            if not custom_x or not custom_y:
-                raise ValueError("Scatter requires two numeric fields.")
-            plot_df = df[[custom_x, custom_y] + ([custom_color] if color_arg else [])].copy()
-            plot_df[custom_x] = pd.to_numeric(plot_df[custom_x], errors="coerce")
-            plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
-            plot_df = plot_df.dropna(subset=[custom_x, custom_y])
-            if plot_df.empty:
-                raise ValueError("No valid numeric rows are available for the selected scatter plot.")
-            fig = px.scatter(plot_df, x=custom_x, y=custom_y, color=color_arg, title=custom_title, trendline="ols" if len(plot_df) >= 3 else None)
-
-        elif custom_chart_type == "Histogram":
-            if not custom_x:
-                raise ValueError("Histogram requires a numeric field.")
-            values = pd.to_numeric(df[custom_x], errors="coerce")
-            plot_df = pd.DataFrame({custom_x: values}).dropna()
-            if plot_df.empty:
-                raise ValueError("No valid numeric values are available for the histogram.")
-            fig = px.histogram(plot_df, x=custom_x, nbins=30, marginal="box", title=custom_title)
-
-        elif custom_chart_type in {"Box", "Violin", "Strip"}:
-            if not custom_y:
-                raise ValueError(f"{custom_chart_type} requires a numeric field.")
-            cols = [custom_y]
-            if custom_x and custom_x != "None":
-                cols.insert(0, custom_x)
-            if color_arg and color_arg not in cols:
-                cols.append(color_arg)
-            plot_df = df[cols].copy()
-            plot_df[custom_y] = pd.to_numeric(plot_df[custom_y], errors="coerce")
-            plot_df = plot_df.dropna(subset=[custom_y])
-            if plot_df.empty:
-                raise ValueError("No valid values are available for this distribution chart.")
-            if custom_chart_type == "Box":
-                fig = px.box(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, title=custom_title, points="outliers")
-            elif custom_chart_type == "Violin":
-                fig = px.violin(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, box=True, points=False, title=custom_title)
-            else:
-                fig = px.strip(plot_df, x=None if custom_x == "None" else custom_x, y=custom_y, color=color_arg, title=custom_title)
-
-        elif custom_chart_type in {"Treemap", "Sunburst"}:
-            levels = [level for level in [level_1, level_2, level_3] if level != "None"]
-            levels = list(dict.fromkeys(levels))
-            if not levels:
-                raise ValueError(f"{custom_chart_type} requires at least one category level.")
-            cols = levels + ([] if custom_y == "Row Count" or _is_calculated_metric(custom_y) else [custom_y])
-            work = df[cols].copy()
-            if _is_calculated_metric(custom_y):
-                work[custom_y] = _metric_series(df, custom_y)
-            for level in levels:
-                work[level] = work[level].fillna("Missing").astype(str)
-            if custom_y == "Row Count":
-                work["__value__"] = 1
-                value_field = "__value__"
-            else:
-                if not _is_calculated_metric(custom_y):
-                    work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                work = work.dropna(subset=[custom_y])
-                value_field = custom_y
-            if work.empty:
-                raise ValueError("No valid rows are available for this hierarchy chart.")
-            group_cols = levels
-            grouped = work.groupby(group_cols, as_index=False)[value_field].agg(custom_aggregation.lower())
-            grouped = _apply_ranking(grouped, value_field)
-            if custom_chart_type == "Treemap":
-                fig = px.treemap(grouped, path=levels, values=value_field, color=value_field, title=custom_title)
-            else:
-                fig = px.sunburst(grouped, path=levels, values=value_field, color=value_field, title=custom_title)
-
-        else:
-            if not custom_x:
-                raise ValueError("A category / X-axis field is required.")
-            # Build a unique column list. Selecting the same field as both
-            # category and value creates duplicate DataFrame columns and can
-            # make pandas return a DataFrame instead of a Series.
-            cols = []
-            for col in [custom_x, (custom_y if custom_y != "Row Count" and not _is_calculated_metric(custom_y) else None), color_arg]:
-                if col and col not in cols:
-                    cols.append(col)
-
-            work = df[cols].copy()
-            if _is_calculated_metric(custom_y):
-                work[custom_y] = _metric_series(df, custom_y)
-            work[custom_x] = work[custom_x].fillna("Missing").astype(str)
-
-            if custom_chart_type in {"Pie", "Donut"}:
-                # Pie/Donut is intentionally category + one measure only.
-                if custom_y == custom_x:
-                    raise ValueError("Category and Value must be different fields.")
-
-                if custom_y == "Row Count":
-                    grouped = (
-                        work.groupby(custom_x, as_index=False)
-                        .size()
-                        .rename(columns={"size": "Row Count"})
-                    )
-                    value_field = "Row Count"
-                else:
-                    if not _is_calculated_metric(custom_y):
-                        work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                    work = work.dropna(subset=[custom_y])
-                    if work.empty:
-                        raise ValueError("No valid numeric values are available for this chart.")
-                    grouped = (
-                        work.groupby(custom_x, as_index=False)[custom_y]
-                        .agg(custom_aggregation.lower())
-                    )
-                    value_field = custom_y
-
-                grouped = _apply_ranking(grouped, value_field)
-
-                if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
-                    raise ValueError("Pie and donut charts require non-negative values.")
-
-                fig = px.pie(
-                    grouped,
-                    names=custom_x,
-                    values=value_field,
-                    title=custom_title,
-                    hole=0.45 if custom_chart_type == "Donut" else 0,
-                )
-
-            else:
-                if custom_y == "Row Count":
-                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
-                    grouped = (
-                        work.groupby(group_cols, as_index=False)
-                        .size()
-                        .rename(columns={"size": "Row Count"})
-                    )
-                    value_field = "Row Count"
-                else:
-                    if not _is_calculated_metric(custom_y):
-                        work[custom_y] = pd.to_numeric(work[custom_y], errors="coerce")
-                    work = work.dropna(subset=[custom_y])
-                    if work.empty:
-                        raise ValueError("No valid numeric values are available for this chart.")
-                    group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
-                    grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
-                    value_field = custom_y
-
-                grouped = _apply_ranking(grouped, value_field)
-
-                if custom_chart_type == "Bar":
-                    fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
-                elif custom_chart_type == "Line":
-                    fig = px.line(grouped, x=custom_x, y=value_field, color=color_arg, markers=True, title=custom_title)
-                elif custom_chart_type == "Area":
-                    fig = px.area(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
-                elif custom_chart_type == "Funnel":
-                    fig = px.funnel(grouped, x=value_field, y=custom_x, color=color_arg, title=custom_title)
-                else:
-                    raise ValueError("Unsupported chart type.")
-
+        fig = _build_custom_figure(df, _current_config)
         fig.update_layout(height=520, margin=dict(l=20, r=20, t=70, b=20))
         st.session_state["dashboard_custom_chart_figure"] = fig
+        st.session_state["dashboard_custom_chart_config"] = _current_config.copy()
         st.session_state["dashboard_custom_chart_title_value"] = custom_title
-
     except Exception as exc:
         st.error(f"Unable to generate the selected visualization: {exc}")
+
+# Recalculate the last generated custom chart whenever a global filter changes.
+# This keeps the preview synchronized with the filtered dataset without
+# requiring the user to press Generate again.
+if st.session_state.get("dashboard_custom_chart_config") is not None:
+    try:
+        _live_fig = _build_custom_figure(df, st.session_state["dashboard_custom_chart_config"])
+        _live_fig.update_layout(height=520, margin=dict(l=20, r=20, t=70, b=20))
+        st.session_state["dashboard_custom_chart_figure"] = _live_fig
+    except Exception:
+        pass
 
 if st.session_state.get("dashboard_custom_chart_figure") is not None:
     st.plotly_chart(
@@ -668,24 +859,13 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
         use_container_width=True,
         key="dashboard_custom_chart_output",
     )
-    st.caption("Custom visualization generated directly from the active dataset. Change the graph type or fields and generate again.")
+    st.caption("Custom visualization generated from the currently filtered dataset.")
 
     if st.button("➕ Add to My Dashboard", type="secondary", use_container_width=True, key="dashboard_add_saved_chart"):
         if "dashboard_saved_charts" not in st.session_state:
             st.session_state["dashboard_saved_charts"] = []
-
-        saved_chart = {
-            "figure": st.session_state["dashboard_custom_chart_figure"].to_dict(),
-            "title": st.session_state.get("dashboard_custom_chart_title_value", custom_title),
-            "chart_type": custom_chart_type,
-            "x": custom_x,
-            "y": custom_y,
-            "aggregation": custom_aggregation,
-            "color": custom_color,
-            "ranking": custom_ranking,
-            "rank_n": int(custom_rank_n),
-        }
-        st.session_state["dashboard_saved_charts"].append(saved_chart)
+        config = st.session_state.get("dashboard_custom_chart_config", _current_config.copy())
+        st.session_state["dashboard_saved_charts"].append({"config": config.copy()})
         st.success("Chart added to My Dashboard.")
 
 
@@ -695,23 +875,31 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
 
 if st.session_state.get("dashboard_saved_charts"):
     st.markdown('<div class="section-title">📌 My Dashboard</div>', unsafe_allow_html=True)
-    st.caption("Saved custom visualizations are kept for this Streamlit session.")
+    st.caption("Saved charts automatically recalculate when Global Filters / Slicers change.")
 
     saved = st.session_state["dashboard_saved_charts"]
     for _idx, _saved in enumerate(saved):
+        _config = _saved.get("config", {})
         _left, _right = st.columns([6, 1])
         with _left:
-            st.markdown(f"**{_saved.get('title', 'Saved Chart')}**")
+            st.markdown(f"**{_config.get('title', 'Saved Chart')}**")
         with _right:
             if st.button("🗑️ Remove", key=f"dashboard_remove_saved_{_idx}"):
                 st.session_state["dashboard_saved_charts"].pop(_idx)
                 st.rerun()
-
-        st.plotly_chart(
-            go.Figure(_saved["figure"]),
-            use_container_width=True,
-            key=f"dashboard_saved_chart_{_idx}",
-        )
+        try:
+            if _config:
+                _saved_fig = _build_custom_figure(df, _config)
+                _saved_fig.update_layout(height=460, margin=dict(l=20, r=20, t=70, b=20))
+                st.plotly_chart(_saved_fig, use_container_width=True, key=f"dashboard_saved_chart_{_idx}")
+            elif _saved.get("figure"):
+                # Backward compatibility for charts saved by the previous
+                # session-state format. They remain viewable until removed.
+                st.plotly_chart(go.Figure(_saved["figure"]), use_container_width=True, key=f"dashboard_saved_chart_{_idx}")
+            else:
+                st.info("This saved chart has no reusable configuration. Remove it and save it again.")
+        except Exception as _exc:
+            st.warning(f"Saved chart could not be recalculated with the current filters: {_exc}")
         st.divider()
 
 
