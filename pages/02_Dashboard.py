@@ -450,6 +450,46 @@ else:  # Treemap / Sunburst
     custom_x = level_1
     custom_y = st.selectbox("Size / Value", metric_options, key="dashboard_custom_y")
 
+# Optional ranking for aggregated charts. This is applied after aggregation so
+# Top/Bottom N always uses the actual calculated metric values.
+ranking_enabled_types = {"Bar", "Line", "Area", "Pie", "Donut", "Funnel", "Treemap", "Sunburst"}
+if custom_chart_type in ranking_enabled_types:
+    rank_c1, rank_c2 = st.columns([1.2, 1.0])
+    with rank_c1:
+        custom_ranking = st.selectbox(
+            "Ranking",
+            ["None", "Top N", "Bottom N"],
+            key="dashboard_custom_ranking",
+            help="Limit the chart to the highest or lowest N aggregated values.",
+        )
+    with rank_c2:
+        custom_rank_n = st.number_input(
+            "Number of items",
+            min_value=1,
+            max_value=100,
+            value=10,
+            step=1,
+            key="dashboard_custom_rank_n",
+        )
+else:
+    custom_ranking = "None"
+    custom_rank_n = 10
+
+def _apply_ranking(grouped, value_field):
+    """Apply Top/Bottom N after deterministic aggregation."""
+    if custom_ranking == "None" or grouped is None or grouped.empty:
+        return grouped
+    values = pd.to_numeric(grouped[value_field], errors="coerce")
+    grouped = grouped.assign(__ranking_value__=values)
+    ascending = custom_ranking == "Bottom N"
+    grouped = (
+        grouped.sort_values("__ranking_value__", ascending=ascending, kind="stable")
+        .head(int(custom_rank_n))
+        .drop(columns=["__ranking_value__"])
+        .reset_index(drop=True)
+    )
+    return grouped
+
 if st.button("📊 Generate Custom Visualization", type="primary", use_container_width=True, key="dashboard_generate_custom_chart"):
     try:
         fig = None
@@ -524,6 +564,7 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                 raise ValueError("No valid rows are available for this hierarchy chart.")
             group_cols = levels
             grouped = work.groupby(group_cols, as_index=False)[value_field].agg(custom_aggregation.lower())
+            grouped = _apply_ranking(grouped, value_field)
             if custom_chart_type == "Treemap":
                 fig = px.treemap(grouped, path=levels, values=value_field, color=value_field, title=custom_title)
             else:
@@ -569,6 +610,8 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                     )
                     value_field = custom_y
 
+                grouped = _apply_ranking(grouped, value_field)
+
                 if (pd.to_numeric(grouped[value_field], errors="coerce") < 0).any():
                     raise ValueError("Pie and donut charts require non-negative values.")
 
@@ -598,6 +641,8 @@ if st.button("📊 Generate Custom Visualization", type="primary", use_container
                     group_cols = [custom_x] + ([color_arg] if color_arg and color_arg != custom_x else [])
                     grouped = work.groupby(group_cols, as_index=False)[custom_y].agg(custom_aggregation.lower())
                     value_field = custom_y
+
+                grouped = _apply_ranking(grouped, value_field)
 
                 if custom_chart_type == "Bar":
                     fig = px.bar(grouped, x=custom_x, y=value_field, color=color_arg, title=custom_title)
@@ -637,6 +682,8 @@ if st.session_state.get("dashboard_custom_chart_figure") is not None:
             "y": custom_y,
             "aggregation": custom_aggregation,
             "color": custom_color,
+            "ranking": custom_ranking,
+            "rank_n": int(custom_rank_n),
         }
         st.session_state["dashboard_saved_charts"].append(saved_chart)
         st.success("Chart added to My Dashboard.")
