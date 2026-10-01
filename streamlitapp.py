@@ -875,7 +875,6 @@ if "workflow_completed" not in st.session_state:
         "forecasting": False,
         "network": False,
         "reports": False,
-        "lineage": False,
     }
 
 
@@ -888,18 +887,24 @@ def _dataset_is_network():
 
 
 def _unlocked_steps():
-    state = st.session_state.workflow_completed
+    """All InsightAI modules are available once an active dataset exists.
+
+    The workflow is guidance only; it is not a lock system.
+    Network Intelligence remains visible only for network/PCAP datasets.
+    """
     has_data = st.session_state.get("active_dataframe") is not None
-    unlocked = {"home": True}
-    unlocked["cleaning"] = has_data
-    unlocked["explorer"] = state["cleaning"]
-    unlocked["dashboard"] = state["explorer"]
-    unlocked["ai"] = state["dashboard"]
-    unlocked["anomaly"] = state["ai"]
-    unlocked["forecasting"] = state["anomaly"]
-    unlocked["network"] = state["forecasting"] and _dataset_is_network()
-    unlocked["reports"] = state["forecasting"] and (state["network"] if _dataset_is_network() else True)
-    return unlocked
+    return {
+        "home": True,
+        "cleaning": has_data,
+        "explorer": has_data,
+        "dashboard": has_data,
+        "ai": has_data,
+        "anomaly": has_data,
+        "forecasting": has_data,
+        "network": has_data and _dataset_is_network(),
+        "reports": has_data,
+        "lineage": has_data,
+    }
 
 
 def _render_workflow_sidebar():
@@ -916,27 +921,25 @@ def _render_workflow_sidebar():
         st.markdown("### Workflow")
 
         labels = [
-            ("home", "📂", "Select Data"),
-            ("cleaning", "🧹", "Data Cleaning"),
-            ("explorer", "🔎", "Data Explorer"),
-            ("dashboard", "📊", "Dashboard"),
-            ("ai", "🤖", "AI Analyst"),
-            ("anomaly", "🚨", "Anomaly Detection"),
-            ("forecasting", "🔮", "Forecasting"),
-            ("network", "🌐", "Network Intelligence"),
-            ("reports", "📄", "Reports"),
+            ("home", "Select Data"),
+            ("cleaning", "Data Cleaning"),
+            ("explorer", "Data Explorer"),
+            ("dashboard", "Dashboard"),
+            ("ai", "AI Analyst"),
+            ("anomaly", "Anomaly Detection"),
+            ("forecasting", "Forecasting"),
+            ("network", "Network Intelligence"),
+            ("reports", "Reports"),
+            ("lineage", "Data Lineage & Evidence"),
         ]
-        for key, icon, label in labels:
+        for key, label in labels:
             if key == "network" and not _dataset_is_network():
                 continue
             if unlocked.get(key):
-                # IMPORTANT: the entrypoint script itself is not a valid page-link
-                # target when st.navigation() is controlling routing. Use the
-                # registered StreamlitPage objects for every destination.
+                # The registered page supplies its own icon. Do not prefix
+                # another emoji here, otherwise every item shows two icons.
                 target_page = PAGE_OBJECTS[key]
-                st.page_link(target_page, label=f"{icon} {label}")
-            else:
-                st.markdown(f"<div style='padding:7px 8px; opacity:.42;'>🔒 {label}</div>", unsafe_allow_html=True)
+                st.page_link(target_page, label=label)
 
         st.divider()
         done = sum(bool(v) for k, v in state.items() if k != "home")
