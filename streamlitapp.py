@@ -862,6 +862,7 @@ WORKFLOW = [
     ("network", "🌐", "Network Intelligence", "pages/07_Network_Intelligence.py"),
     ("reports", "📄", "Reports", "pages/06_Reports.py"),
     ("lineage", "🔍", "Data Lineage & Evidence", "pages/09_Data_Lineage.py"),
+    ("whatif", "🔮", "What-If Analysis", "pages/10_What_If.py"),
 ]
 
 if "workflow_completed" not in st.session_state:
@@ -930,6 +931,7 @@ def _render_workflow_sidebar():
             ("network", "Network Intelligence"),
             ("reports", "Reports"),
             ("lineage", "Data Lineage & Evidence"),
+            ("whatif", "What-If Analysis"),
         ]
         for key, label in labels:
             # Every module is intentionally open before data upload.
@@ -959,6 +961,7 @@ pages = {
         st.Page("pages/07_Network_Intelligence.py", title="Network Intelligence", icon="🌐", url_path="network"),
         st.Page("pages/06_Reports.py", title="Reports", icon="📄", url_path="reports"),
         st.Page("pages/09_Data_Lineage.py", title="Data Lineage & Evidence", icon="🔍", url_path="lineage"),
+        st.Page("pages/10_What_If.py", title="What-If Analysis", icon="🔮", url_path="what-if"),
     ],
 }
 
@@ -979,6 +982,7 @@ PAGE_OBJECTS = {
     "network": pages["Workflow"][6],
     "reports": pages["Workflow"][7],
     "lineage": pages["Workflow"][8],
+    "whatif": pages["Workflow"][9],
 }
 
 # Render our custom workflow sidebar after the router is registered.
@@ -997,6 +1001,7 @@ path_to_key = {
     "network": "network",
     "reports": "reports",
     "lineage": "lineage",
+    "whatif": "what-if",
 }
 key = path_to_key.get(current_path)
 if key and key != "home":
