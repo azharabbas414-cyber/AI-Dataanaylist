@@ -861,6 +861,7 @@ WORKFLOW = [
     ("forecasting", "🔮", "Forecasting", "pages/05_Forecasting.py"),
     ("network", "🌐", "Network Intelligence", "pages/07_Network_Intelligence.py"),
     ("reports", "📄", "Reports", "pages/06_Reports.py"),
+    ("lineage", "🔍", "Data Lineage & Evidence", "pages/09_Data_Lineage.py"),
 ]
 
 if "workflow_completed" not in st.session_state:
@@ -874,6 +875,7 @@ if "workflow_completed" not in st.session_state:
         "forecasting": False,
         "network": False,
         "reports": False,
+        "lineage": False,
     }
 
 
@@ -896,7 +898,6 @@ def _unlocked_steps():
     unlocked["anomaly"] = state["ai"]
     unlocked["forecasting"] = state["anomaly"]
     unlocked["network"] = state["forecasting"] and _dataset_is_network()
-    unlocked["modeling"] = has_data
     unlocked["reports"] = state["forecasting"] and (state["network"] if _dataset_is_network() else True)
     return unlocked
 
@@ -923,18 +924,19 @@ def _render_workflow_sidebar():
             ("anomaly", "🚨", "Anomaly Detection"),
             ("forecasting", "🔮", "Forecasting"),
             ("network", "🌐", "Network Intelligence"),
-            ("modeling", "🔗", "Data Modeling"),
             ("reports", "📄", "Reports"),
         ]
         for key, icon, label in labels:
             if key == "network" and not _dataset_is_network():
                 continue
-
-            # All workflow modules remain available from the sidebar.
-            # We keep the existing routing and page registration unchanged;
-            # this only removes the lock/disabled state from the UI.
-            target_page = PAGE_OBJECTS[key]
-            st.page_link(target_page, label=label)
+            if unlocked.get(key):
+                # IMPORTANT: the entrypoint script itself is not a valid page-link
+                # target when st.navigation() is controlling routing. Use the
+                # registered StreamlitPage objects for every destination.
+                target_page = PAGE_OBJECTS[key]
+                st.page_link(target_page, label=f"{icon} {label}")
+            else:
+                st.markdown(f"<div style='padding:7px 8px; opacity:.42;'>🔒 {label}</div>", unsafe_allow_html=True)
 
         st.divider()
         done = sum(bool(v) for k, v in state.items() if k != "home")
@@ -958,8 +960,8 @@ pages = {
         st.Page("pages/04_Anomaly_Detection.py", title="Anomaly Detection", icon="🚨", url_path="anomaly"),
         st.Page("pages/05_Forecasting.py", title="Forecasting", icon="🔮", url_path="forecasting"),
         st.Page("pages/07_Network_Intelligence.py", title="Network Intelligence", icon="🌐", url_path="network"),
-        st.Page("pages/08_Data_Modeling.py", title="Data Modeling", icon="🔗", url_path="data-modeling"),
         st.Page("pages/06_Reports.py", title="Reports", icon="📄", url_path="reports"),
+        st.Page("pages/09_Data_Lineage.py", title="Data Lineage & Evidence", icon="🔍", url_path="lineage"),
     ],
 }
 
@@ -978,8 +980,8 @@ PAGE_OBJECTS = {
     "anomaly": pages["Workflow"][4],
     "forecasting": pages["Workflow"][5],
     "network": pages["Workflow"][6],
-    "modeling": pages["Workflow"][7],
-    "reports": pages["Workflow"][8],
+    "reports": pages["Workflow"][7],
+    "lineage": pages["Workflow"][8],
 }
 
 # Render our custom workflow sidebar after the router is registered.
@@ -996,8 +998,8 @@ path_to_key = {
     "anomaly": "anomaly",
     "forecasting": "forecasting",
     "network": "network",
-    "data-modeling": "modeling",
     "reports": "reports",
+    "lineage": "lineage",
 }
 key = path_to_key.get(current_path)
 if key and key != "home":
