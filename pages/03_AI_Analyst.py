@@ -15,6 +15,7 @@ from ai.analyst import (
 from ai.provider import get_ai_provider
 from core.analytics import analyze_dataset
 from core.dataset_detector import detect_dataset_type
+from core.chart_engine import build_chart_payload
 try:
     from core.query_engine import query_dataframe
 except Exception:
@@ -44,6 +45,9 @@ if "ai_last_answer" not in st.session_state:
 
 if "ai_last_question" not in st.session_state:
     st.session_state.ai_last_question = ""
+
+if "ai_chart_payload" not in st.session_state:
+    st.session_state.ai_chart_payload = None
 
 
 # =========================================================
@@ -310,6 +314,16 @@ if ask_question and question:
                 st.session_state.ai_last_question = question
                 st.session_state.ai_last_answer = answer
 
+                # Build visuals from deterministic query evidence. The AI
+                # explains the result, but never calculates chart values.
+                try:
+                    chart_payload = build_chart_payload(df, question)
+                    st.session_state.ai_chart_payload = (
+                        chart_payload if chart_payload.get("handled") else None
+                    )
+                except Exception:
+                    st.session_state.ai_chart_payload = None
+
             except Exception as error:
                 st.error(f"AI analysis failed: {error}")
 
@@ -347,6 +361,14 @@ if ask_question and question:
 
                     st.session_state.ai_last_question = question
                     st.session_state.ai_last_answer = fallback
+
+                    try:
+                        chart_payload = build_chart_payload(df, question)
+                        st.session_state.ai_chart_payload = (
+                            chart_payload if chart_payload.get("handled") else None
+                        )
+                    except Exception:
+                        st.session_state.ai_chart_payload = None
 
                 except Exception as fallback_error:
                     st.error(
@@ -387,7 +409,43 @@ if st.session_state.ai_conversation:
         st.session_state.ai_conversation = []
         st.session_state.ai_last_answer = ""
         st.session_state.ai_last_question = ""
+        st.session_state.ai_chart_payload = None
         st.rerun()
+
+
+# =========================================================
+# VISUAL ANSWER
+# =========================================================
+
+chart_payload = st.session_state.get("ai_chart_payload")
+if chart_payload and chart_payload.get("handled"):
+    st.divider()
+    st.markdown("### 📊 Visual Answer")
+    st.caption(
+        "Chart values are calculated directly from the active dataset. "
+        "The AI explains the result separately."
+    )
+
+    fig = chart_payload.get("figure")
+    if fig is not None:
+        fig.update_layout(
+            height=460,
+            margin=dict(l=20, r=20, t=70, b=20),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    meta_col1, meta_col2, meta_col3 = st.columns(3)
+    with meta_col1:
+        st.caption(f"**Chart:** {chart_payload.get('title', 'InsightAI chart')}")
+    with meta_col2:
+        st.caption(f"**Source:** {chart_payload.get('source', 'deterministic calculation')}")
+    with meta_col3:
+        rows_used = chart_payload.get("rows_used")
+        st.caption(
+            f"**Rows/Groups:** {rows_used:,}"
+            if isinstance(rows_used, int)
+            else "**Rows/Groups:** calculated evidence"
+        )
 
 
 # =========================================================
