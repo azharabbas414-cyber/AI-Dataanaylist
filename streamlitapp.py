@@ -887,23 +887,22 @@ def _dataset_is_network():
 
 
 def _unlocked_steps():
-    """All InsightAI modules are available once an active dataset exists.
+    """Navigation policy: every module is always open.
 
-    The workflow is guidance only; it is not a lock system.
-    Network Intelligence remains visible only for network/PCAP datasets.
+    Modules may show a helpful "No active dataset" message when no data has
+    been loaded, but navigation itself is never locked.
     """
-    has_data = st.session_state.get("active_dataframe") is not None
     return {
         "home": True,
-        "cleaning": has_data,
-        "explorer": has_data,
-        "dashboard": has_data,
-        "ai": has_data,
-        "anomaly": has_data,
-        "forecasting": has_data,
-        "network": has_data and _dataset_is_network(),
-        "reports": has_data,
-        "lineage": has_data,
+        "cleaning": True,
+        "explorer": True,
+        "dashboard": True,
+        "ai": True,
+        "anomaly": True,
+        "forecasting": True,
+        "network": True,
+        "reports": True,
+        "lineage": True,
     }
 
 
@@ -933,18 +932,13 @@ def _render_workflow_sidebar():
             ("lineage", "Data Lineage & Evidence"),
         ]
         for key, label in labels:
-            if key == "network" and not _dataset_is_network():
-                continue
-            if unlocked.get(key):
-                # The registered page supplies its own icon. Do not prefix
-                # another emoji here, otherwise every item shows two icons.
-                target_page = PAGE_OBJECTS[key]
-                st.page_link(target_page, label=label)
+            # Every module is intentionally open before data upload.
+            # The page itself handles the "no active dataset" state.
+            target_page = PAGE_OBJECTS[key]
+            st.page_link(target_page, label=label)
 
         st.divider()
-        done = sum(bool(v) for k, v in state.items() if k != "home")
-        total = 7 if _dataset_is_network() else 6
-        st.caption(f"Workflow progress: **{done}/{total} completed**")
+        st.caption("All modules are open. Load a dataset when you are ready to analyze it.")
         if st.session_state.get("active_dataset"):
             st.caption(f"📌 {st.session_state.active_dataset}")
 
