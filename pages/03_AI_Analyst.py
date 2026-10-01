@@ -170,26 +170,32 @@ if dataset_type == "network_capture":
         ),
     ]
 
+def _set_question_from_button(prompt: str) -> None:
+    """Put a button prompt directly into the visible question widget."""
+    st.session_state["ai_question_input"] = prompt
+
+
+def _clear_question() -> None:
+    """Clear the visible question widget."""
+    st.session_state["ai_question_input"] = ""
+
+
 cols = st.columns(len(quick_actions))
 
 for index, (label, prompt) in enumerate(quick_actions):
     with cols[index]:
-        if st.button(
+        st.button(
             label,
             key=f"quick_action_{index}",
             use_container_width=True,
-        ):
-            st.session_state.ai_pending_question = prompt
+            on_click=_set_question_from_button,
+            args=(prompt,),
+        )
 
 
 # =========================================================
 # QUESTION INPUT
 # =========================================================
-
-pending_question = st.session_state.pop(
-    "ai_pending_question",
-    "",
-)
 
 
 # =========================================================
@@ -208,10 +214,20 @@ follow_ups = [
 ]
 for i, (label, prompt) in enumerate(follow_ups):
     with follow_up_cols[i]:
-        if st.button(label, key=f"conversation_followup_{i}", use_container_width=True):
-            if st.session_state.ai_conversation:
-                st.session_state.ai_pending_question = prompt
-            else:
+        if st.session_state.ai_conversation:
+            st.button(
+                label,
+                key=f"conversation_followup_{i}",
+                use_container_width=True,
+                on_click=_set_question_from_button,
+                args=(prompt,),
+            )
+        else:
+            if st.button(
+                label,
+                key=f"conversation_followup_{i}",
+                use_container_width=True,
+            ):
                 st.warning("Ask an initial question first so InsightAI has context.")
 
 st.markdown("### 💬 Ask InsightAI")
@@ -225,7 +241,6 @@ st.caption(
 # make it look like there is no question box in the main workspace.
 question = st.text_area(
     "Your question",
-    value=pending_question,
     placeholder=(
         "Example: What are the most important findings in this dataset? Then ask Why?, Show Evidence, or What Next."
     ),
@@ -241,13 +256,12 @@ with ask_col:
         use_container_width=True,
     )
 with clear_col:
-    if st.button(
+    st.button(
         "Clear",
         use_container_width=True,
         help="Clear the question box.",
-    ):
-        st.session_state.ai_question_input = ""
-        st.rerun()
+        on_click=_clear_question,
+    )
 
 if ask_question and question:
     question = question.strip()
