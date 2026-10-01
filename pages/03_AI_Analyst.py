@@ -15,6 +15,7 @@ from ai.analyst import (
 from ai.provider import get_ai_provider
 from core.analytics import analyze_dataset
 from core.dataset_detector import detect_dataset_type
+from core.investigation import build_investigation, investigation_prompt
 try:
     from core.query_engine import query_dataframe
 except Exception:
@@ -114,6 +115,101 @@ else:
     st.info(
         "🔵 AI provider is not configured. "
         "InsightAI will still answer using its local analytics and network engines."
+    )
+
+
+# =========================================================
+# INVESTIGATION MODE
+# =========================================================
+
+st.markdown("### 🧭 Investigation Mode")
+st.caption(
+    "Combine deterministic evidence from data quality, metrics, anomalies, "
+    "relationships, and trends before asking AI to explain it."
+)
+
+if st.button("🔬 Run Full Investigation", type="primary", use_container_width=True):
+    with st.spinner("Collecting evidence across InsightAI engines..."):
+        try:
+            evidence = build_investigation(df, dataset_name)
+            st.session_state.investigation_evidence = evidence
+
+            if ai_available:
+                try:
+                    st.session_state.investigation_narrative = provider.analyze(
+                        investigation_prompt(evidence)
+                    )
+                except Exception:
+                    st.session_state.investigation_narrative = ""
+            else:
+                st.session_state.investigation_narrative = ""
+        except Exception as error:
+            st.error(f"Investigation failed: {error}")
+
+investigation = st.session_state.get("investigation_evidence")
+if investigation:
+    ev = investigation
+    hc = ev.get("health", {})
+    ac = ev.get("anomalies", {})
+    tr = ev.get("trend", {})
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Quality Score", f"{hc.get('quality_score', 0):.1f}/100")
+    k2.metric("Missing Values", f"{hc.get('missing_values', 0):,}")
+    k3.metric("Anomalies", f"{ac.get('total_anomalies', 0):,}")
+    if tr.get("available"):
+        k4.metric("Latest Trend", f"{tr.get('change_pct', 0):+.1f}%")
+    else:
+        k4.metric("Correlations", f"{len(ev.get('correlations', [])):,}")
+
+    if ev.get("metric"):
+        m = ev["metric"]
+        st.info(
+            f"**{m['metric']}** = {m['formula']} → **{m['total']:,.2f}** "
+            f"using {m['valid_rows']:,} valid rows."
+        )
+
+    with st.expander("📈 Evidence Summary", expanded=True):
+        left, right = st.columns(2)
+        with left:
+            st.write("**Top relationships**")
+            corr = ev.get("correlations", [])
+            if corr:
+                st.dataframe(pd.DataFrame(corr), use_container_width=True, hide_index=True)
+            else:
+                st.write("No numeric relationship evidence available.")
+        with right:
+            st.write("**Anomaly evidence**")
+            if ac.get("explanations"):
+                for item in ac["explanations"]:
+                    st.write(f"• {item}")
+            else:
+                st.write("No strong anomaly explanation was generated.")
+
+    if tr.get("available"):
+        st.write(
+            f"**Trend:** {tr['metric']} changed **{tr['change_pct']:+.2f}%** "
+            f"from the previous period. Peak: **{tr['peak_value']:,.2f}** "
+            f"at {tr['peak_period']}."
+        )
+
+    narrative = st.session_state.get("investigation_narrative", "")
+    if narrative:
+        st.markdown("#### 🤖 AI Investigation")
+        st.markdown(narrative)
+    else:
+        st.markdown("#### 🧠 Deterministic Investigation")
+        st.write(
+            "The evidence package is ready. Configure an AI provider if you want "
+            "a narrative explanation; the metrics above remain deterministic."
+        )
+
+    st.download_button(
+        "⬇️ Download Investigation Evidence (JSON)",
+        data=__import__('json').dumps(ev, indent=2, default=str),
+        file_name="insightai_investigation_evidence.json",
+        mime="application/json",
+        use_container_width=True,
     )
 
 
