@@ -15,6 +15,10 @@ from ai.analyst import (
 from ai.provider import get_ai_provider
 from core.analytics import analyze_dataset
 from core.dataset_detector import detect_dataset_type
+try:
+    from core.query_engine import query_dataframe
+except Exception:
+    query_dataframe = None
 
 
 # =========================================================
@@ -231,6 +235,15 @@ if ask_question and question:
 
         with st.spinner("InsightAI is analyzing the evidence..."):
             try:
+                # Capture deterministic query evidence for Data Lineage.
+                if query_dataframe is not None:
+                    try:
+                        query_result = query_dataframe(df, question)
+                        if query_result.get("handled"):
+                            st.session_state.last_query_result = query_result
+                    except Exception:
+                        pass
+
                 answer = answer_question(
                     question=question,
                     df=df,
@@ -335,6 +348,11 @@ if st.session_state.ai_conversation:
 # =========================================================
 
 st.divider()
+
+st.markdown("### 🔍 Traceability")
+st.caption("See where the latest deterministic answer came from.")
+if st.button("🔗 Open Data Lineage & Evidence", use_container_width=True):
+    st.switch_page("pages/09_Data_Lineage.py")
 
 st.markdown("### 🔍 Evidence Available to InsightAI")
 
